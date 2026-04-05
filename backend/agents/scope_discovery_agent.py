@@ -1,0 +1,181 @@
+"""ScopeDiscoveryAgent — Asset discovery and scope validation sub-agent (Section 5.2).
+
+Tools: crt_sh, whois, shodan, dns_enum, github_scan
+Runs first in most engagements to establish scope boundaries.
+Produces >= 5 asset types from a seed domain.
+
+Asset types:
+  - subdomains (crt_sh)
+  - registrant_info (whois)
+  - network_services (shodan, stealth-aware)
+  - ip_addresses (dns_enum)
+  - code_repositories (github_scan)
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any
+
+from backend.core.base_agent import AgentAction, BaseAgent
+from backend.core.llm_router import LLMRouter
+from backend.core.models import (
+    AgentResult,
+    AgentTask,
+    AgentType,
+    EngineType,
+    StealthLevel,
+)
+from backend.agents.scan_agent import _extract_target, _plan_with_llm
+
+logger = logging.getLogger(__name__)
+
+SCOPE_SYSTEM_PROMPT = """You are a scope discovery agent. Enumerate assets and validate scope boundaries.
+
+Available tools: crt_sh, whois, shodan, dns_enum, github_scan
+Note: shodan is only available at stealth levels low and medium.
+
+Respond with JSON: {"tool": "name", "input": {"target": "...", "flags": "..."}, "reasoning": "...", "is_terminal": false}
+When done: {"tool": null, "input": {}, "reasoning": "Scope discovery complete", "is_terminal": true}"""
+
+# Asset type categories
+ASSET_TYPES = [
+    "subdomains",
+    "registrant_info",
+    "network_services",
+    "ip_addresses",
+    "code_repositories",
+]
+
+
+@dataclass
+class ScopeDiscoveryAgent(BaseAgent):
+    """Scope discovery and asset enumeration agent.
+
+    Produces >= 5 asset types from a seed domain:
+      - subdomains: from crt_sh (CT log search)
+      - registrant_info: from whois (domain registration)
+      - network_services: from shodan (stealth-aware, skipped at HIGH)
+      - ip_addresses: from dns_enum (DNS enumeration)
+      - code_repositories: from github_scan (GitHub search)
+    """
+
+    agent_type: AgentType = AgentType.SCOPE_DISCOVERY
+    engine: EngineType = EngineType.INFRASTRUCTURE
+    allowed_tools: frozenset[str] = field(
+        default_factory=lambda: frozenset({"crt_sh", "whois", "shodan", "dns_enum", "github_scan"})
+    )
+    max_iterations: int = 10
+    llm_router: LLMRouter | None = None
+    _action_history: list[dict[str, Any]] = field(default_factory=list)
+    _discovered_assets: dict[str, list[Any]] = field(default_factory=dict)
+
+    async def execute(self, task: AgentTask) -> AgentResult:
+        self._action_history = []
+        self._discovered_assets = {t: [] for t in ASSET_TYPES}
+        result = await self.run_loop(task)
+
+        # Attach asset summary to result
+        result.metadata = result.metadata or {}
+        result.metadata["asset_types"] = self._discovered_assets
+        result.metadata["asset_type_count"] = sum(
+            1 for v in self._discovered_assets.values() if v
+        )
+        return result
+
+    async def _plan_next_action(self, task: AgentTask) -> AgentAction | None:
+        target = _extract_target(task.prompt)
+        if self.llm_router:
+            return await _plan_with_llm(self, task, target, SCOPE_SYSTEM_PROMPT)
+        return self._plan_fallback(target)
+
+    def _plan_fallback(self, target: str) -> AgentAction | None:
+        step = len(self._action_history)
+
+        # Build steps — shodan only at low/medium stealth
+        steps = [
+            AgentAction("crt_sh", {"target": target}, "Certificate transparency log search — discover subdomains"),
+            AgentAction("whois", {"target": target}, "Domain registration lookup — registrant info"),
+        ]
+
+        # Shodan: stealth-aware (skipped at HIGH)
+        if self.stealth_level != StealthLevel.HIGH:
+            steps.append(
+                AgentAction("shodan", {"target": target}, "Internet device search — network services")
+            )
+
+        steps.extend([
+            AgentAction("dns_enum", {"target": target}, "DNS enumeration — IP addresses"),
+            AgentAction("github_scan", {"target": target}, "GitHub repository scanning — code repos"),
+        ])
+
+        if step >= len(steps):
+            return None
+
+        action = steps[step]
+        self._action_history.append({
+            "tool": action.tool_name,
+            "input": action.tool_input,
+            "reasoning": action.reasoning,
+        })
+        return action
+
+    def parse_asset_types(self, tool_outputs: dict[str, Any]) -> dict[str, list[Any]]:
+        """Parse tool outputs into categorized asset types.
+
+        Returns dict mapping asset type -> list of discovered assets.
+        At least 5 asset types should be populated from a seed domain.
+        """
+        assets: dict[str, list[Any]] = {t: [] for t in ASSET_TYPES}
+
+        for tool_name, output in tool_outputs.items():
+            output_str = str(output) if output else ""
+
+            if tool_name == "crt_sh":
+                # CT logs -> subdomains
+                import re
+                domains = re.findall(r'[\w.-]+\.[a-zA-Z]{2,}', output_str)
+                assets["subdomains"].extend(list(set(domains))[:20])
+
+            elif tool_name == "whois":
+                # WHOIS -> registrant info
+                registrant_fields = {}
+                for line in output_str.split("\n"):
+                    for key in ["Registrant", "Organization", "Admin", "Tech", "Name Server"]:
+                        if key.lower() in line.lower():
+                            registrant_fields[key] = line.strip()
+                if registrant_fields:
+                    assets["registrant_info"].append(registrant_fields)
+                else:
+                    assets["registrant_info"].append({"raw": output_str[:200]})
+
+            elif tool_name == "shodan":
+                # Shodan -> network services
+                import re
+                ports = re.findall(r'port[:\s]+(\d+)', output_str, re.IGNORECASE)
+                services = re.findall(r'service[:\s]+(\S+)', output_str, re.IGNORECASE)
+                if ports or services:
+                    for p in ports:
+                        assets["network_services"].append({"port": int(p)})
+                    for s in services:
+                        assets["network_services"].append({"service": s})
+                else:
+                    assets["network_services"].append({"raw": output_str[:200]})
+
+            elif tool_name == "dns_enum":
+                # DNS -> IP addresses
+                import re
+                ips = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', output_str)
+                assets["ip_addresses"].extend(list(set(ips))[:20])
+
+            elif tool_name == "github_scan":
+                # GitHub -> code repositories
+                import re
+                repos = re.findall(r'github\.com/[\w.-]+/[\w.-]+', output_str)
+                if repos:
+                    assets["code_repositories"].extend(list(set(repos))[:10])
+                else:
+                    assets["code_repositories"].append({"search_result": output_str[:200]})
+
+        return assets
