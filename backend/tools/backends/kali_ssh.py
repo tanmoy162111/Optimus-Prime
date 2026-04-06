@@ -114,6 +114,7 @@ class KaliConnectionManager:
         password: str = "optimus",
         pool_size: int = POOL_SIZE,
         event_bus: Any = None,
+        terminal_broadcaster: Any | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -123,6 +124,7 @@ class KaliConnectionManager:
         self._semaphore = asyncio.Semaphore(pool_size)
         self._pool: list[KaliConnection] = []
         self._event_bus = event_bus
+        self._terminal_broadcaster = terminal_broadcaster
         self._pool_lock = asyncio.Lock()
 
     async def connect(self) -> None:
@@ -239,6 +241,30 @@ class KaliConnectionManager:
                     "stderr": "",
                     "exit_code": -1,
                 }
+
+            if self._terminal_broadcaster is not None:
+                from datetime import datetime, timezone
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if stdout:
+                    await self._terminal_broadcaster.publish({
+                        "type": "kali_output",
+                        "source": "kali",
+                        "agent": tool_input.get("_agent_name"),
+                        "tool": tool_name,
+                        "stream": "stdout",
+                        "data": stdout,
+                        "ts": ts,
+                    })
+                if stderr:
+                    await self._terminal_broadcaster.publish({
+                        "type": "kali_output",
+                        "source": "kali",
+                        "agent": tool_input.get("_agent_name"),
+                        "tool": tool_name,
+                        "stream": "stderr",
+                        "data": stderr,
+                        "ts": ts,
+                    })
 
             return {
                 "status": "success" if exit_code == 0 else "error",

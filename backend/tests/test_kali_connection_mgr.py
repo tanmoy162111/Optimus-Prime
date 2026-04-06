@@ -335,3 +335,104 @@ class TestExponentialBackoff:
             delay *= 2
 
         assert delays == [2.0, 4.0, 8.0, 16.0, 30.0]
+
+
+class TestKaliConnectionManagerBroadcast:
+    """Verify that execute() publishes stdout/stderr to TerminalBroadcaster."""
+
+    async def test_execute_broadcasts_stdout(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from backend.core.terminal_broadcaster import TerminalBroadcaster
+
+        broadcaster = TerminalBroadcaster()
+        broadcaster.publish = AsyncMock()
+
+        mgr = KaliConnectionManager(
+            host="kali", port=22, username="root", password="optimus",
+            event_bus=MagicMock(),
+            terminal_broadcaster=broadcaster,
+        )
+
+        mock_conn = MagicMock()
+        mock_conn.exec_command.return_value = ("scan complete\n", "", 0)
+        mgr._pool = [mock_conn]
+        mgr._semaphore = asyncio.Semaphore(3)
+
+        mock_spec = MagicMock()
+        mock_spec.timeout_seconds = 30
+
+        with patch.object(mgr, "_get_healthy_connection", return_value=mock_conn):
+            result = await mgr.execute(
+                tool_name="nmap",
+                tool_input={"target": "10.0.0.1"},
+                tool_spec=mock_spec,
+            )
+
+        assert result["stdout"] == "scan complete\n"
+
+        broadcaster.publish.assert_awaited()
+        call_event = broadcaster.publish.call_args_list[0][0][0]
+        assert call_event["type"] == "kali_output"
+        assert call_event["source"] == "kali"
+        assert call_event["tool"] == "nmap"
+        assert call_event["stream"] == "stdout"
+        assert "scan complete" in call_event["data"]
+
+    async def test_execute_broadcasts_stderr_when_non_empty(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from backend.core.terminal_broadcaster import TerminalBroadcaster
+
+        broadcaster = TerminalBroadcaster()
+        broadcaster.publish = AsyncMock()
+
+        mgr = KaliConnectionManager(
+            host="kali", port=22, username="root", password="optimus",
+            event_bus=MagicMock(),
+            terminal_broadcaster=broadcaster,
+        )
+
+        mock_conn = MagicMock()
+        mock_conn.exec_command.return_value = ("", "permission denied\n", 1)
+        mgr._pool = [mock_conn]
+        mgr._semaphore = asyncio.Semaphore(3)
+
+        mock_spec = MagicMock()
+        mock_spec.timeout_seconds = 30
+
+        with patch.object(mgr, "_get_healthy_connection", return_value=mock_conn):
+            await mgr.execute(
+                tool_name="nmap",
+                tool_input={"target": "10.0.0.1"},
+                tool_spec=mock_spec,
+            )
+
+        calls = [c[0][0] for c in broadcaster.publish.call_args_list]
+        stderr_calls = [c for c in calls if c.get("stream") == "stderr"]
+        assert len(stderr_calls) == 1
+        assert "permission denied" in stderr_calls[0]["data"]
+
+    async def test_execute_without_broadcaster_does_not_raise(self):
+        """broadcaster=None (default) must be backward-compatible."""
+        from unittest.mock import MagicMock, patch
+
+        mgr = KaliConnectionManager(
+            host="kali", port=22, username="root", password="optimus",
+            event_bus=MagicMock(),
+        )
+
+        mock_conn = MagicMock()
+        mock_conn.exec_command.return_value = ("ok\n", "", 0)
+        mgr._pool = [mock_conn]
+        mgr._semaphore = asyncio.Semaphore(3)
+
+        mock_spec = MagicMock()
+        mock_spec.timeout_seconds = 30
+
+        with patch.object(mgr, "_get_healthy_connection", return_value=mock_conn):
+            result = await mgr.execute(
+                tool_name="nmap",
+                tool_input={"target": "10.0.0.1"},
+                tool_spec=mock_spec,
+            )
+
+        assert result["status"] == "success"
