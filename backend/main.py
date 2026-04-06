@@ -28,7 +28,7 @@ from typing import Any
 from dotenv import load_dotenv
 load_dotenv()  # Load .env before any os.environ.get calls
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.core.chat_handler import ChatHandler
@@ -55,7 +55,7 @@ from backend.tools.backends.kali_ssh import KaliConnectionManager
 # M3 imports
 from backend.memory.smart_memory import SmartMemory
 from backend.memory.client_profile import ClientProfileDB
-from backend.intelligence.intelligent_reporter import IntelligentReporter
+from backend.intelligence.intelligent_reporter import IntelligentReporter, REPORT_FORMATS
 from backend.intelligence.compliance_mapping import ComplianceMappingDB
 from backend.intelligence.research_kb import ResearchKB
 from backend.intelligence.research_daemon import ResearchDaemon
@@ -194,7 +194,7 @@ async def lifespan(app: FastAPI):
     # LLM Router
     claude = ClaudeProvider(
         api_key=os.environ.get("CLAUDE_API_KEY", ""),
-        model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+        model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
     )
     ollama_fallback = OllamaProvider(
         base_url=os.environ.get("OLLAMA_HOST", "http://ollama:11434"),
@@ -314,6 +314,16 @@ async def lifespan(app: FastAPI):
     await kali_mgr.close()
     await event_bus.close()
     logger.info("Optimus Prime v2.0 — shutdown complete")
+
+
+def _resolve_findings(
+    body_findings: list[dict[str, Any]] | None,
+    reporter: IntelligentReporter,
+) -> list[dict[str, Any]]:
+    """Return body_findings if non-empty; fall back to reporter accumulated findings."""
+    if body_findings:
+        return body_findings
+    return reporter.confirmed_findings
 
 
 async def _prune_loop(event_bus: EventBus) -> None:
@@ -532,8 +542,9 @@ async def websocket_chat(websocket: WebSocket):
             msg = json.loads(data)
             content = msg.get("content", msg.get("message", ""))
 
-            if not content:
-                await websocket.send_json({"type": "error", "content": "Empty message"})
+            # Ignore handshake/control messages (e.g. reconnect sent by the
+            # useWebSocket hook on every connect).
+            if msg.get("type") in ("reconnect", "ack") or not content:
                 continue
 
             # Handle gate confirmation commands via chat text
@@ -582,12 +593,30 @@ async def _execute_plan_background(
     """Execute an engagement plan in the background."""
     try:
         result = await omo.execute_plan(plan)
-        await websocket.send_json({
+
+        # Collect per-phase errors for operator visibility
+        phase_errors = [
+            {"phase": pr.phase_name, "error": pr.error}
+            for pr in result.phase_results
+            if pr.error
+        ]
+        # Surface agent-level errors when phase errors are empty
+        if not phase_errors:
+            for pr in result.phase_results:
+                for ar in pr.agent_results:
+                    if ar.error:
+                        phase_errors.append({"phase": pr.phase_name, "error": ar.error})
+
+        payload: dict[str, Any] = {
             "type": "engagement_complete",
             "plan_id": result.plan_id,
             "status": result.status,
             "total_findings": result.total_findings,
-        })
+        }
+        if phase_errors:
+            payload["errors"] = phase_errors
+
+        await websocket.send_json(payload)
     except Exception as exc:
         logger.error("Background plan execution failed: %s", exc)
         try:

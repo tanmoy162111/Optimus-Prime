@@ -234,3 +234,35 @@ class TestReportPDFExport:
         report = reporter.generate_report("executive", findings=SAMPLE_FINDINGS)
         pdf = await reporter.export_pdf(report)
         assert pdf.startswith(b"%PDF")
+
+
+# ---------------------------------------------------------------------------
+# _resolve_findings helper
+# ---------------------------------------------------------------------------
+
+class TestResolveFindingsHelper:
+    """Unit tests for the hybrid findings resolution helper."""
+
+    def test_uses_body_findings_when_provided(self):
+        from backend.main import _resolve_findings
+        reporter = IntelligentReporter()
+        reporter.add_finding({"title": "accumulated", "severity": "low"})
+        body = [{"title": "from body", "severity": "high"}]
+        result = _resolve_findings(body, reporter)
+        assert result == body
+
+    def test_falls_back_to_reporter_when_body_empty(self):
+        from backend.main import _resolve_findings
+        reporter = IntelligentReporter()
+        reporter.add_finding({"title": "accumulated", "severity": "low"})
+        result = _resolve_findings([], reporter)
+        assert len(result) == 1
+        assert result[0]["title"] == "accumulated"
+
+    def test_falls_back_when_body_none(self):
+        from backend.main import _resolve_findings
+        reporter = IntelligentReporter()
+        reporter.add_finding({"title": "accumulated", "severity": "low"})
+        result = _resolve_findings(None, reporter)
+        assert len(result) == 1
+        assert result[0]["title"] == "accumulated"
