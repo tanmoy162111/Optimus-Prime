@@ -381,10 +381,10 @@ class IntelligentReporter:
             return await self._pdf_renderer(report_data)
 
         # Default: generate simple HTML and return as bytes
-        html = self._render_html(report_data)
+        html = self.render_html(report_data)
         return html.encode("utf-8")
 
-    def _render_html(self, report_data: dict[str, Any]) -> str:
+    def render_html(self, report_data: dict[str, Any]) -> str:
         """Render report data to HTML string."""
         fmt = report_data.get("format", "technical")
         generated = report_data.get("generated_at", "")

@@ -483,7 +483,7 @@ async def generate_report_html(
         framework=body.get("framework"),
         findings=findings,
     )
-    html = reporter._render_html(report)
+    html = reporter.render_html(report)
     return Response(
         content=html.encode("utf-8"),
         media_type="text/html",
