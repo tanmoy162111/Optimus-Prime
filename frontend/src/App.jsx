@@ -411,7 +411,136 @@ function renderPayload(payload) {
   return parts.length > 0 ? parts.join('  ·  ') : JSON.stringify(p).slice(0, 120)
 }
 
-function EventFeed({ events }) {
+// ─── Terminal components ───────────────────────────────────────────────────────
+
+function TerminalLine({ line }) {
+  const { type, source, agent, tool, stream, level, data, ts } = line
+
+  const timestamp = ts
+    ? new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : ''
+
+  let label = ''
+  let labelColor = ''
+  let textColor = 'text-zinc-300'
+
+  if (type === 'operator_input') {
+    label = '[OPERATOR]'
+    labelColor = 'text-cyan-300'
+    textColor = 'text-cyan-200 opacity-60'
+  } else if (type === 'kali_output' && agent == null) {
+    label = '[OPERATOR]'
+    labelColor = 'text-cyan-400'
+    textColor = stream === 'stderr' ? 'text-red-400' : 'text-cyan-100'
+  } else if (type === 'kali_output') {
+    label = `[${agent || '?'} \u203a ${tool || '?'}]`
+    labelColor = 'text-emerald-400'
+    textColor = stream === 'stderr' ? 'text-red-400' : 'text-zinc-200'
+  } else if (type === 'backend_log') {
+    label = '[backend]'
+    if (level === 'WARNING') {
+      labelColor = 'text-amber-400'
+      textColor = 'text-amber-200'
+    } else if (level === 'ERROR') {
+      labelColor = 'text-red-400'
+      textColor = 'text-red-300'
+    } else {
+      labelColor = 'text-zinc-500'
+      textColor = 'text-zinc-500'
+    }
+  } else {
+    label = `[${source || type}]`
+    labelColor = 'text-zinc-600'
+  }
+
+  const rows = (data || '').split('\n').filter(Boolean)
+
+  return (
+    <>
+      {rows.map((row, i) => (
+        <div key={i} className="flex items-start gap-2 px-3 py-0.5 hover:bg-zinc-900/40 group">
+          <span className="font-mono text-xs text-zinc-700 shrink-0 w-16 select-none">{i === 0 ? timestamp : ''}</span>
+          <span className={`font-mono text-xs shrink-0 ${labelColor}`}>{i === 0 ? label : ''}</span>
+          <span className={`font-mono text-xs break-all whitespace-pre-wrap ${textColor}`}>{row}</span>
+        </div>
+      ))}
+    </>
+  )
+}
+
+function TerminalInput({ agentActive }) {
+  const [cmd, setCmd] = useState('')
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState(null)
+  const inputRef = useRef(null)
+
+  const handleSubmit = async () => {
+    const command = cmd.trim()
+    if (!command || running) return
+    setRunning(true)
+    setError(null)
+    try {
+      const resp = await fetch(`${API_BASE}/terminal/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}))
+        setError(err.detail || `HTTP ${resp.status}`)
+      } else {
+        setCmd('')
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setRunning(false)
+      inputRef.current?.focus()
+    }
+  }
+
+  const handleKey = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleSubmit() }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-zinc-800">
+      {agentActive && (
+        <div className="flex items-center gap-2 px-3 py-1 bg-amber-900/20 border-b border-amber-800/40">
+          <AlertTriangle size={11} className="text-amber-400 shrink-0" />
+          <span className="font-mono text-xs text-amber-400">Agent active — commands will run concurrently</span>
+        </div>
+      )}
+      {error && (
+        <div className="px-3 py-1 bg-red-900/20 border-b border-red-800/40">
+          <span className="font-mono text-xs text-red-400">{error}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="font-mono text-xs text-emerald-600 shrink-0 select-none">kali@optimus:~$</span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={cmd}
+          onChange={e => setCmd(e.target.value)}
+          onKeyDown={handleKey}
+          disabled={running}
+          placeholder="enter command..."
+          className="flex-1 bg-transparent font-mono text-xs text-zinc-200 placeholder:text-zinc-700 outline-none disabled:opacity-40"
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={running || !cmd.trim()}
+          className="font-mono text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          {running ? '...' : 'RUN'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function TerminalPanel({ lines, agentActive, wsConnected }) {
   const bottomRef = useRef(null)
   const containerRef = useRef(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -420,7 +549,7 @@ function EventFeed({ events }) {
     if (autoScroll) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [events, autoScroll])
+  }, [lines, autoScroll])
 
   const handleScroll = () => {
     const el = containerRef.current
@@ -433,16 +562,16 @@ function EventFeed({ events }) {
     <div className="panel flex flex-col h-full relative scan-lines">
       <div className="panel-header shrink-0">
         <div className="flex items-center gap-2">
-          <Activity size={13} className="text-zinc-500" />
-          <span className="label-xs">Live Event Feed</span>
-          {events.length > 0 && (
+          <Terminal size={13} className="text-zinc-500" />
+          <span className="label-xs">Terminal</span>
+          {wsConnected && (
             <span className="flex items-center gap-1.5 ml-1">
               <span className="dot-live" />
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
-          <span className="font-mono text-xs text-zinc-600">{events.length} events</span>
+          <span className="font-mono text-xs text-zinc-600">{lines.length} lines</span>
           {!autoScroll && (
             <button
               onClick={() => { setAutoScroll(true); bottomRef.current?.scrollIntoView() }}
@@ -453,22 +582,25 @@ function EventFeed({ events }) {
           )}
         </div>
       </div>
+
       <div
         ref={containerRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto"
       >
-        {events.length === 0 ? (
+        {lines.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <Activity size={24} className="text-zinc-700 mb-3" />
-            <p className="font-mono text-xs text-zinc-600">Waiting for events...</p>
-            <p className="text-xs text-zinc-700 mt-1">Set a scope and send a directive to begin</p>
+            <Terminal size={24} className="text-zinc-700 mb-3" />
+            <p className="font-mono text-xs text-zinc-600">Waiting for terminal output...</p>
+            <p className="text-xs text-zinc-700 mt-1">Start an engagement or type a command below</p>
           </div>
         ) : (
-          events.map((ev, i) => <EventCard key={ev._id || i} event={ev} index={i} />)
+          lines.map((line, i) => <TerminalLine key={i} line={line} />)
         )}
         <div ref={bottomRef} />
       </div>
+
+      <TerminalInput agentActive={agentActive} />
     </div>
   )
 }
@@ -1036,6 +1168,10 @@ export default function App() {
   const [pendingGate, setPendingGate] = useState(null)
   const [eventCounter, setEventCounter] = useState(0)
 
+  // Terminal panel state
+  const [terminalLines, setTerminalLines] = useState([])
+  const [terminalWsConnected, setTerminalWsConnected] = useState(false)
+
   // Fetch health + directives
   const fetchHealth = useCallback(async () => {
     try {
@@ -1176,6 +1312,24 @@ export default function App() {
   const { connected: eventsConnected } = useWebSocket(`${WS_BASE}/ws`, handleEventMessage)
   const { connected: chatConnected, send: sendChat } = useWebSocket(`${WS_BASE}/chat`, handleChatMessage)
 
+  const handleTerminalMessage = useCallback((data) => {
+    setTerminalLines(prev => {
+      const next = [...prev, data]
+      return next.length > 2000 ? next.slice(next.length - 2000) : next
+    })
+  }, [])
+
+  const { connected: terminalConnected } = useWebSocket(
+    `${WS_BASE}/ws/terminal`,
+    handleTerminalMessage,
+  )
+
+  useEffect(() => {
+    setTerminalWsConnected(terminalConnected)
+  }, [terminalConnected])
+
+  const agentActive = agents.some(a => a.status === 'running')
+
   // Send operator message
   const handleSendMessage = useCallback((text) => {
     setChatMessages(prev => [...prev, { role: 'user', content: text }])
@@ -1245,9 +1399,13 @@ export default function App() {
           <div className="shrink-0">
             <HealthPanel health={health} onRefresh={fetchHealth} />
           </div>
-          {/* Event feed — takes ~45% of centre */}
+          {/* Terminal feed — takes ~45% of centre */}
           <div style={{ flex: '0 0 42%' }} className="min-h-0">
-            <EventFeed events={events} />
+            <TerminalPanel
+              lines={terminalLines}
+              agentActive={agentActive}
+              wsConnected={terminalWsConnected}
+            />
           </div>
           {/* Chat — fills remaining */}
           <div className="flex-1 min-h-0">
