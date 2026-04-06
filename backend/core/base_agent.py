@@ -155,6 +155,24 @@ class BaseAgent(ABC):
             # Execute with full permission pipeline
             result = await self._execute_with_permissions(action)
 
+            # Log tool failures for observability
+            if not result.success:
+                logger.warning(
+                    "Agent %s: tool %s FAILED — %s",
+                    self.agent_id, action.tool_name, result.error,
+                )
+
+            # Parse findings from tool output (#7)
+            if result.success and result.output and hasattr(self, "parse_findings_from_output"):
+                parsed = self.parse_findings_from_output(action.tool_name, result.output)
+                if parsed:
+                    result.findings.extend(parsed)
+                    result.is_finding = True
+                    logger.info(
+                        "Agent %s: parsed %d findings from %s",
+                        self.agent_id, len(parsed), action.tool_name,
+                    )
+
             # Log to XAI
             await self.xai_logger.log_decision(
                 agent=self.__class__.__name__,
@@ -207,13 +225,23 @@ class BaseAgent(ABC):
             return result
         except Exception as exc:
             logger.error(
-                "Agent %s: tool %s failed: %s",
-                self.agent_id, action.tool_name, exc,
+                "Agent %s: tool %s raised %s: %s",
+                self.agent_id, action.tool_name, type(exc).__name__, exc,
             )
             return ToolResult(
                 success=False,
-                error=str(exc),
+                error=f"{type(exc).__name__}: {exc}",
             )
+
+    def parse_findings_from_output(
+        self, tool_name: str, output: Any,
+    ) -> list:
+        """Parse raw tool output into structured findings.
+
+        Override in subclasses to provide tool-specific parsing.
+        Default returns empty list.
+        """
+        return []
 
 
 def _sanitize_input(tool_input: dict[str, Any]) -> str:

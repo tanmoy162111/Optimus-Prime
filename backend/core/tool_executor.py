@@ -6,6 +6,7 @@ to the appropriate backend handler based on ToolSpec.backend.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -32,10 +33,12 @@ class ToolExecutor:
         tool_registry: dict[str, ToolSpec],
         permission_pipeline: PermissionPipeline,
         xai_logger: XAILogger | None = None,
+        event_bus: Any = None,
     ) -> None:
         self._registry = tool_registry
         self._pipeline = permission_pipeline
         self._xai_logger = xai_logger
+        self._event_bus = event_bus
         self._backends: dict[str, Any] = {}  # Backend handlers registered at startup
 
     def register_backend(self, backend_type: str, handler: Any) -> None:
@@ -83,9 +86,10 @@ class ToolExecutor:
             context=context,
         )
 
-        # Dispatch to backend
+        # Dispatch to backend with timeout enforcement (#19)
         is_error = False
         result_output = None
+        timeout = getattr(tool_spec, 'timeout_seconds', 300)
         try:
             backend = self._backends.get(tool_spec.backend.value)
             if backend is None:
@@ -94,7 +98,20 @@ class ToolExecutor:
                     error=f"No backend registered for {tool_spec.backend.value}",
                 )
 
-            result_output = await backend.execute(tool_name, tool_input, tool_spec)
+            result_output = await asyncio.wait_for(
+                backend.execute(tool_name, tool_input, tool_spec),
+                timeout=float(timeout),
+            )
+        except asyncio.TimeoutError:
+            is_error = True
+            result_output = f"Tool {tool_name} timed out after {timeout}s"
+            logger.error("ToolExecutor: %s timed out after %ds", tool_name, timeout)
+            if self._event_bus:
+                await self._event_bus.publish(
+                    channel="system",
+                    event_type="TOOL_TIMEOUT",
+                    payload={"tool": tool_name, "timeout_seconds": timeout},
+                )
         except Exception as exc:
             is_error = True
             result_output = str(exc)

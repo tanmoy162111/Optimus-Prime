@@ -331,6 +331,13 @@ class OmX:
         phases = phase_builder()
         description = DIRECTIVE_DESCRIPTIONS.get(directive, directive)
 
+        # Auto-build scope from targets found in the message if no scope provided
+        if scope is None or not scope.targets:
+            targets = _extract_targets_from_message(message)
+            if targets:
+                scope = ScopeConfig(targets=targets)
+                logger.info("OmX: auto-scope from directive message: %s", targets)
+
         return EngagementPlan(
             plan_id=str(uuid.uuid4()),
             directive=directive,
@@ -411,3 +418,26 @@ class OmX:
     def get_available_directives(self) -> dict[str, str]:
         """Return all supported directives and their descriptions."""
         return dict(DIRECTIVE_DESCRIPTIONS)
+
+
+def _extract_targets_from_message(message: str) -> list[str]:
+    """Extract IP addresses, CIDR ranges, and domain names from a message.
+
+    Strips known directive keywords before parsing so they aren't
+    mistaken for targets.
+    """
+    # Remove directive keywords
+    cleaned = _DIRECTIVE_RE.sub("", message).strip()
+    targets: list[str] = []
+
+    # IP / CIDR
+    for m in re.finditer(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?:/\d{1,2})?)\b', cleaned):
+        targets.append(m.group(1))
+
+    # Domain names (skip if already captured as IP)
+    for m in re.finditer(r'\b((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})\b', cleaned):
+        domain = m.group(1)
+        if domain not in targets:
+            targets.append(domain)
+
+    return targets

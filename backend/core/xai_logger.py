@@ -120,12 +120,21 @@ class XAILogger:
 
     @staticmethod
     def _sanitize_text(text: str) -> str:
-        """Remove potential credential values from text."""
-        # Basic heuristic — strip anything that looks like a key=value credential
+        """Remove potential credential values from text (#11)."""
         import re
-        return re.sub(
+        # Basic key=value redaction
+        text = re.sub(
             r'(password|secret|token|api_key|access_key|secret_key|private_key)\s*[=:]\s*\S+',
             r'\1=***REDACTED***',
             text,
             flags=re.IGNORECASE,
         )
+        # AWS access key
+        text = re.sub(r'AKIA[0-9A-Z]{16}', '***REDACTED***', text)
+        # Bearer token
+        text = re.sub(r'(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*', 'Bearer ***REDACTED***', text)
+        # OpenAI/Claude key format (sk-...)
+        text = re.sub(r'sk-[A-Za-z0-9]{20,}', '***REDACTED***', text)
+        # Inline secret_key=... or api_key=... in command strings
+        text = re.sub(r'(?i)api[_-]?key\s*[=:]\s*\S+', 'api_key=***REDACTED***', text)
+        return text

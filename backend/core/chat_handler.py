@@ -10,6 +10,7 @@ Receives operator messages from WebSocket:
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -155,10 +156,16 @@ class ChatHandler:
                 "Answer questions about security, explain findings, or help plan engagements."
             )
 
+            t0 = time.monotonic()
             response = await self._llm.complete(
                 messages=[LLMMessage(role="user", content=message)],
                 system_prompt=system_prompt,
-                max_tokens=2048,
+                max_tokens=1024,
+            )
+            elapsed = time.monotonic() - t0
+            logger.info(
+                "ChatHandler: LLM responded in %.1fs (%d tokens, model=%s)",
+                elapsed, response.tokens_used, response.model,
             )
 
             return ChatResponse(

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -197,7 +198,11 @@ class ReconAgent(BaseAgent):
         if domain_match:
             return domain_match.group()
 
-        # Fallback: use the prompt as target
+        # Fallback: use first target from scope config
+        if self.scope and self.scope.targets:
+            return self.scope.targets[0]
+
+        # Last resort: use the prompt as target
         return prompt.strip()
 
     def _build_history_summary(self) -> str:
@@ -224,7 +229,6 @@ class ReconAgent(BaseAgent):
 
         # Simple heuristic: look for open ports in nmap output
         if tool_name == "nmap" and "open" in output_str.lower():
-            import re
             port_matches = re.findall(r'(\d+)/(?:tcp|udp)\s+open\s+(\S+)', output_str)
             for port, service in port_matches:
                 finding = Finding(

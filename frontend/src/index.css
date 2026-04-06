@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Panel Components ──────────────────────────────────────────────────── */
+@layer components {
+  .panel {
+    @apply bg-zinc-900/80 border border-zinc-800 rounded-lg overflow-hidden;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-900;
+  }
+
+  .label-xs {
+    @apply font-mono text-[10px] font-semibold tracking-[0.08em] uppercase text-zinc-500;
+  }
+
+  .input-field {
+    @apply bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2
+           text-zinc-200 placeholder-zinc-600 font-mono
+           focus:outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500/30
+           transition-colors;
+  }
+
+  .btn-primary {
+    @apply flex items-center justify-center gap-2
+           bg-white text-zinc-950 font-mono text-xs font-semibold
+           rounded-md py-2 px-4
+           hover:bg-zinc-200 active:bg-zinc-300
+           disabled:opacity-40 disabled:cursor-not-allowed
+           transition-colors;
+  }
+
+  .btn-ghost {
+    @apply flex items-center justify-center
+           text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800
+           rounded-md transition-colors;
+  }
+
+  /* ── Severity badges ─────────────────────────────────────────────────── */
+  .severity-critical {
+    @apply text-red-400 border-red-500/40 bg-red-500/10;
+  }
+  .severity-high {
+    @apply text-orange-400 border-orange-500/40 bg-orange-500/10;
+  }
+  .severity-medium {
+    @apply text-yellow-400 border-yellow-500/40 bg-yellow-500/10;
+  }
+  .severity-low {
+    @apply text-blue-400 border-blue-500/40 bg-blue-500/10;
+  }
+  .severity-info {
+    @apply text-zinc-400 border-zinc-600 bg-zinc-800/60;
+  }
+
+  /* ── Live indicator dot ──────────────────────────────────────────────── */
+  .dot-live {
+    @apply inline-block w-1.5 h-1.5 rounded-full bg-emerald-400;
+    animation: dot-pulse 2s ease-in-out infinite;
+  }
+}
+
+/* ─── Custom Animations ─────────────────────────────────────────────────── */
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ─── Scan-lines overlay (subtle CRT effect on event feed) ──────────────── */
+.scan-lines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.008) 2px,
+    rgba(255, 255, 255, 0.008) 4px
+  );
+}

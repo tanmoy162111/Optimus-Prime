@@ -147,19 +147,31 @@ class KaliConnectionManager:
         )
 
     async def _get_healthy_connection(self) -> KaliConnection:
-        """Get a healthy connection from the pool, reconnecting if needed."""
+        """Get a healthy connection — lock only held for pool reads, not reconnect sleep."""
+        # Step 1: find a healthy slot under the lock (fast operation)
+        conn_to_reconnect = None
         async with self._pool_lock:
-            # Find a connected one first
             for conn in self._pool:
                 healthy = await asyncio.to_thread(conn.health_check)
                 if healthy:
                     return conn
+            # No healthy connections found — pick first slot to reconnect
+            if self._pool:
+                conn_to_reconnect = self._pool[0]
 
-            # No healthy connection — try reconnecting each
-            for conn in self._pool:
-                success = await self._reconnect_connection(conn)
-                if success:
-                    return conn
+        # Step 2: reconnect OUTSIDE the lock — sleep does not block other callers
+        if conn_to_reconnect:
+            success = await self._reconnect_connection(conn_to_reconnect)
+            if success:
+                return conn_to_reconnect
+
+        # Step 3: try remaining pool slots outside the lock
+        async with self._pool_lock:
+            remaining = list(self._pool[1:])  # Already tried index 0
+        for conn in remaining:
+            success = await self._reconnect_connection(conn)
+            if success:
+                return conn
 
         # Total failure
         await self._publish_unreachable()

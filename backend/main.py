@@ -3,7 +3,7 @@
 Wires together all M0–M3 components:
   - EventBus (DurableEventLog) with 24h prune
   - KaliConnectionManager connection pool
-  - LLMRouter with Claude/Mistral providers
+  - LLMRouter with Claude/Ollama(Gemma4) providers
   - ToolRegistry, ToolExecutor, PermissionPipeline
   - EngineRouter with Engine 1
   - OmX -> OmO -> ChatHandler
@@ -25,6 +25,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env before any os.environ.get calls
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -35,7 +38,7 @@ from backend.core.hook_runner import HookRunner
 from backend.core.llm_router import (
     ClaudeProvider,
     LLMRouter,
-    MistralOllamaProvider,
+    OllamaProvider,
     TokenBudgetManager,
 )
 from backend.core.models import ScopeConfig
@@ -60,6 +63,20 @@ from backend.intelligence.strategy_evolution import StrategyEvolutionEngine
 from backend.intelligence.custom_tool_generator import CustomToolGenerator
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Logging configuration (#16)
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(name)-30s | %(levelname)-8s | %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+
+# Reduce noise from third-party libraries
+logging.getLogger("paramiko").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # Global state (initialized in lifespan)
@@ -107,7 +124,7 @@ async def lifespan(app: FastAPI):
 
     # Tool Registry (built-in tools from M0)
     from backend.tools.tool_registry import BUILTIN_TOOLS
-    tool_registry = {spec.name: spec for spec in BUILTIN_TOOLS}
+    tool_registry = dict(BUILTIN_TOOLS)
     _state["tool_registry"] = tool_registry
 
     # Tool Executor
@@ -115,6 +132,7 @@ async def lifespan(app: FastAPI):
         tool_registry=tool_registry,
         permission_pipeline=pipeline,
         xai_logger=xai_logger,
+        event_bus=event_bus,
     )
     _state["tool_executor"] = tool_executor
 
@@ -123,15 +141,39 @@ async def lifespan(app: FastAPI):
         host=os.environ.get("KALI_HOST", "kali"),
         port=int(os.environ.get("KALI_PORT", "22")),
         username=os.environ.get("KALI_USER", "root"),
-        password=os.environ.get("KALI_PASS", "optimus"),
+        password=os.environ.get("KALI_PASSWORD", "optimus"),
         event_bus=event_bus,
     )
     _state["kali_mgr"] = kali_mgr
-    # Don't await connect here — Kali may not be reachable yet.
-    # Connection will be established lazily on first tool call.
+    # Eagerly initialize Kali connection pool at startup
+    try:
+        await kali_mgr.connect()
+    except Exception as exc:
+        logger.warning("Kali SSH pool init deferred — %s", exc)
 
     # Register Kali backend in ToolExecutor
     tool_executor.register_backend("kali_ssh", kali_mgr)
+
+    # Register all additional backends (#5) — prevent silent failures
+    from backend.tools.backends.local_subprocess import LocalSubprocessBackend
+    from backend.tools.backends.tor_socks5 import TorSOCKS5Backend
+    from backend.tools.backends.sandbox import SandboxOnDemandBackend
+    from backend.tools.backends.ml_runtime_ipc import MLRuntimeIPC
+    from backend.tools.backends.ics_runtime_ipc import ICSRuntimeIPC
+
+    tool_executor.register_backend("local", LocalSubprocessBackend())
+    tool_executor.register_backend("tor_socks5", TorSOCKS5Backend())
+    tool_executor.register_backend("sandbox", SandboxOnDemandBackend(
+        dvwa_url=f"http://{os.environ.get('DVWA_HOST', 'sandbox')}:{os.environ.get('DVWA_PORT', '80')}",
+    ))
+    ml_ipc_path = Path(os.environ.get("DATA_DIR", "data")) / "ml-runtime-ipc"
+    tool_executor.register_backend("ml_runtime_ipc", MLRuntimeIPC(
+        ipc_dir=ml_ipc_path,
+    ))
+    ics_ipc_path = Path(os.environ.get("DATA_DIR", "data")) / "ics-runtime-ipc"
+    tool_executor.register_backend("ics_runtime_ipc", ICSRuntimeIPC(
+        ipc_dir=ics_ipc_path,
+    ))
 
     # Engine Router — EngineInfra gets full dependency injection
     engine_infra = EngineInfra(
@@ -154,18 +196,24 @@ async def lifespan(app: FastAPI):
         api_key=os.environ.get("CLAUDE_API_KEY", ""),
         model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
     )
-    mistral = MistralOllamaProvider(
+    ollama_fallback = OllamaProvider(
         base_url=os.environ.get("OLLAMA_HOST", "http://ollama:11434"),
-        model=os.environ.get("MISTRAL_MODEL", "mistral:7b"),
+        model=os.environ.get("OLLAMA_MODEL", "qwen2.5:3b"),
+        thinking_enabled=False,
     )
     budget_mgr = TokenBudgetManager(
         budget=int(os.environ.get("TOKEN_BUDGET", "200000")),
         event_bus=event_bus,
     )
-    llm_router = LLMRouter(claude=claude, mistral=mistral, budget_manager=budget_mgr)
+    llm_router = LLMRouter(
+        claude=claude,
+        fallback=ollama_fallback,
+        budget_manager=budget_mgr,
+        event_bus=event_bus,
+    )
     _state["llm_router"] = llm_router
 
-    # Inject LLM router into EngineInfra (created before LLM router)
+    # Now inject llm_router into EngineInfra (created before LLMRouter was ready)
     engine_infra._llm_router = llm_router
 
     # -----------------------------------------------------------------------
@@ -350,7 +398,27 @@ async def set_scope(scope_data: dict[str, Any]):
     chat_handler: ChatHandler | None = _get("chat_handler")
     if chat_handler:
         chat_handler.set_scope(scope)
+    # Also propagate scope to OmO so dispatched agents inherit it
+    omo: OmO | None = _get("omo")
+    if omo:
+        omo._scope = scope
     return {"status": "ok", "targets": scope.targets}
+
+
+@app.post("/gate/{action}/{gate_event_id}")
+async def resolve_gate(action: str, gate_event_id: str):
+    """Resolve a human gate — confirm or skip a phase.
+
+    POST /gate/confirm/<gate_event_id>  -> approve the gate
+    POST /gate/skip/<gate_event_id>     -> reject/skip the gate
+    """
+    omo: OmO | None = _get("omo")
+    if not omo:
+        return {"status": "error", "message": "OmO not initialized"}
+
+    approved = action.lower() == "confirm"
+    omo.resolve_gate(gate_event_id, approved)
+    return {"status": "ok", "gate_event_id": gate_event_id, "approved": approved}
 
 
 # ---------------------------------------------------------------------------
@@ -468,12 +536,29 @@ async def websocket_chat(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "content": "Empty message"})
                 continue
 
+            # Handle gate confirmation commands via chat text
+            if omo and content.startswith(("confirm-", "skip-")):
+                parts = content.split("-", 1)
+                action = parts[0]
+                gate_id = parts[1] if len(parts) > 1 else ""
+                approved = action == "confirm"
+                omo.resolve_gate(gate_id, approved)
+                await websocket.send_json({
+                    "type": "chat",
+                    "content": f"Gate {'approved' if approved else 'skipped'}: {gate_id}",
+                })
+                continue
+
             if chat_handler:
                 response = await chat_handler.handle_message(content)
                 await websocket.send_json(response.to_dict())
 
-                # If it's a plan, offer to execute
-                if response.plan and msg.get("auto_execute", False) and omo:
+                # Auto-execute directive plans immediately
+                if response.plan and omo:
+                    logger.info(
+                        "Auto-executing plan %s (directive=%s)",
+                        response.plan.plan_id, response.plan.directive,
+                    )
                     asyncio.create_task(
                         _execute_plan_background(omo, response.plan, websocket)
                     )

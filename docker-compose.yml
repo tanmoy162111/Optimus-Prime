@@ -31,6 +31,8 @@ services:
       - optimus_xai:/app/data/xai
       - ml_runtime_ipc:/app/data/ml-runtime-ipc
       - ics_runtime_ipc:/app/data/ics-runtime-ipc
+      - optimus_memory:/app/data/memory
+      - client_profiles:/app/data/client_profiles
     environment:
       - PYTHONPATH=/app
     env_file:
@@ -44,31 +46,25 @@ services:
 
   # --- Kali Linux (Engine 1 tooling) ---
   kali:
-    image: kalilinux/kali-rolling
-    command: >
-      bash -c "
-        apt-get update &&
-        apt-get install -y openssh-server &&
-        mkdir -p /run/sshd &&
-        echo 'root:optimus' | chpasswd &&
-        sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config &&
-        /usr/sbin/sshd -D
-      "
-    expose:
-      - "22"
+    build:
+      context: .
+      dockerfile: kali/Dockerfile
+    image: optimus-kali:latest
+    ports:
+      - "2222:22"
     mem_limit: 2g
     cpus: 1.5
     restart: unless-stopped
 
-  # --- Ollama (Mistral + nomic-embed-text) ---
+  # --- Ollama (Gemma4 + nomic-embed-text) ---
   ollama:
     image: ollama/ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
-    mem_limit: 4g
-    cpus: 2.0
+    mem_limit: 12g
+    cpus: 4.0
     restart: unless-stopped
 
   # --- ML Runtime (Engine 3 — network isolated) ---
@@ -87,15 +83,15 @@ services:
   # --- Tor Proxy (Dark web research) ---
   tor:
     image: dperson/torproxy
-    expose:
-      - "9050"
+    ports:
+      - "9050:9050"
     restart: unless-stopped
 
   # --- DVWA Sandbox (Custom tool validation + E2E tests) ---
   sandbox:
     image: vulnerables/web-dvwa
-    expose:
-      - "80"
+    ports:
+      - "8080:80"
     mem_limit: 512m
     cpus: 0.5
     restart: unless-stopped

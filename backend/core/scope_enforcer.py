@@ -47,6 +47,12 @@ class ScopeEnforcer:
     @staticmethod
     def _check_target(scope: ScopeConfig, target: str) -> None:
         """Verify target is in scope and not excluded."""
+        # Explicit empty scope check first (#10)
+        if not scope.targets:
+            raise ScopeViolationError(
+                "No scope configured — set targets via POST /scope or scope.yaml before running tools."
+            )
+
         # Extract hostname/IP from URL if needed
         clean_target = ScopeEnforcer._extract_host(target)
 

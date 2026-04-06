@@ -42,7 +42,7 @@ class DataSecAgent(BaseAgent):
         return await self.run_loop(task)
 
     async def _plan_next_action(self, task: AgentTask) -> AgentAction | None:
-        target = _extract_target(task.prompt)
+        target = _extract_target(task.prompt, scope=self.scope)
         if self.llm_router:
             return await _plan_with_llm(self, task, target, DATASEC_SYSTEM_PROMPT)
         return self._plan_fallback(target)

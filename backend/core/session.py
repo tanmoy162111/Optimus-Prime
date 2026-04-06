@@ -76,6 +76,12 @@ class Session:
     # Token tracking
     _estimated_tokens: int = 0
 
+    # LLM router for real compaction summaries (#2)
+    _llm_router: Any = field(default=None, repr=False)
+
+    # Save cursor to avoid duplicating messages (#12)
+    _last_saved_index: int = field(default=0, repr=False)
+
     @property
     def token_count(self) -> int:
         """Estimated token count for the session."""
@@ -97,7 +103,7 @@ class Session:
     async def compact(self) -> None:
         """Compact the session by summarising older messages.
 
-        Uses Mistral (budget-friendly) to generate summary.
+        Uses Gemma4 via LLMRouter (budget-friendly fallback) for real summaries.
         Preserves recent N messages.
         """
         token_count = self.token_count
@@ -113,11 +119,32 @@ class Session:
         older = self.messages[:-keep_recent]
         recent = self.messages[-keep_recent:]
 
-        # Generate summary (stub — will use Mistral in M1)
-        summary_text = f"[Session compacted: {len(older)} messages summarised]"
-        for msg in older:
-            if msg.role == "assistant" and "finding" in msg.content.lower():
-                summary_text += f"\n- Finding context preserved from {msg.role}"
+        # Real LLM summary via Gemma4 (#2)
+        if self._llm_router is not None:
+            from backend.core.llm_router import LLMMessage
+            history_text = "\n".join(
+                f"{m.role}: {m.content[:300]}" for m in older
+            )
+            try:
+                resp = await self._llm_router.complete(
+                    messages=[LLMMessage(role="user", content=(
+                        f"Summarise this security engagement context in 3-5 sentences, "
+                        f"preserving all findings, tool outputs, and target details:\n{history_text}"
+                    ))],
+                    max_tokens=512,
+                    temperature=0.1,
+                    prefer_fallback=True,
+                )
+                summary_text = resp.content
+            except Exception as exc:
+                logger.warning("Session %s: LLM compaction failed: %s", self.session_id, exc)
+                summary_text = f"[Compacted {len(older)} messages — LLM summary failed]"
+        else:
+            # Fallback stub if no LLM configured
+            summary_text = f"[Compacted {len(older)} messages — no LLM available for summary]"
+            for msg in older:
+                if msg.role == "assistant" and "finding" in msg.content.lower():
+                    summary_text += f"\n- Finding context preserved from {msg.role}"
 
         # Replace older messages with summary
         summary_msg = ConversationMessage(
@@ -213,13 +240,19 @@ class Session:
         )
 
     async def save(self, session_dir: Path | None = None) -> None:
-        """Persist session to JSONL."""
+        """Persist session to JSONL (incremental — only new messages since last save)."""
         base_dir = session_dir or DEFAULT_SESSION_DIR
         base_dir.mkdir(parents=True, exist_ok=True)
 
         filepath = base_dir / f"{self.session_id}.jsonl"
+
+        # Only write messages added since last save (#12)
+        new_messages = self.messages[self._last_saved_index:]
+        if not new_messages:
+            return
+
         with open(filepath, "a", encoding="utf-8") as f:
-            for msg in self.messages:
+            for msg in new_messages:
                 f.write(json.dumps({
                     "role": msg.role,
                     "content": msg.content,
@@ -227,6 +260,8 @@ class Session:
                     "tool_call_id": msg.tool_call_id,
                     "metadata": msg.metadata,
                 }) + "\n")
+
+        self._last_saved_index = len(self.messages)
 
     @classmethod
     async def load(cls, session_id: str, session_dir: Path | None = None) -> Session:

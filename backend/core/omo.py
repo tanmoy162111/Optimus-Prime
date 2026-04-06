@@ -10,6 +10,7 @@ Receives EngagementPlans from OmX and orchestrates phase execution:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -64,12 +65,17 @@ class OmO:
         event_bus: Any = None,
         scope: ScopeConfig | None = None,
         agent_factory: Any = None,
+        gate_timeout: float = 300.0,
     ) -> None:
         self._engine_router = engine_router
         self._task_registry = task_registry
         self._event_bus = event_bus
         self._scope = scope or ScopeConfig()
-        self._agent_factory = agent_factory  # Callable to create agent instances
+        self._agent_factory = agent_factory
+        # Gate resolution state (#8)
+        self._pending_gates: dict[str, asyncio.Event] = {}
+        self._gate_decisions: dict[str, bool] = {}
+        self._gate_timeout: float = gate_timeout
 
     async def execute_plan(self, plan: EngagementPlan) -> EngagementResult:
         """Execute an engagement plan phase by phase.
@@ -241,19 +247,23 @@ class OmO:
         """Dispatch a single agent via the engine router or agent factory."""
         task_id = str(uuid.uuid4())
 
+        # Build a prompt that includes actual targets so agents can extract them
+        targets_str = " ".join(scope.targets) if scope.targets else ""
+        prompt = f"Execute {phase_name} phase against {targets_str}".strip() if targets_str else f"Execute {phase_name} phase"
+
         # Register task
         if self._task_registry:
             task = self._task_registry.create_task(
                 task_id=task_id,
                 agent_class=agent_type.value,
-                prompt=f"Execute {phase_name} phase",
+                prompt=prompt,
             )
         else:
             from backend.core.models import AgentTask
             task = AgentTask(
                 task_id=task_id,
                 agent_class=agent_type.value,
-                prompt=f"Execute {phase_name} phase",
+                prompt=prompt,
             )
 
         # Publish agent spawn
@@ -293,7 +303,7 @@ class OmO:
                 task_id=task_id,
                 engine_type=engine,
                 agent_class=agent_type.value,
-                prompt=f"Execute {phase_name} phase",
+                prompt=prompt,
                 scope=scope,
             )
 
@@ -307,9 +317,8 @@ class OmO:
     async def _check_gate(self, phase: EngagementPhase) -> bool:
         """Check if a phase gate condition is satisfied.
 
-        In M1, auto gates pass automatically. Human gates are logged
-        but auto-approved (full implementation in M2 with WebSocket
-        confirmation flow).
+        Auto gates pass automatically. Human gates require operator
+        confirmation via EventBus (#8).
         """
         if phase.gate is None:
             return True
@@ -318,23 +327,46 @@ class OmO:
             return True
 
         if phase.gate.gate_type == "human":
-            # M1: Log the gate requirement and auto-approve
-            # Full human confirmation flow implemented in M2
-            logger.info(
-                "OmO: gate requires human confirmation for phase %s: %s (auto-approving in M1)",
-                phase.phase_id, phase.gate.description,
-            )
+            gate_event_id = str(uuid.uuid4())
+
+            # Publish gate request — operator must respond in chat
             if self._event_bus:
                 await self._event_bus.publish(
                     channel="lifecycle",
-                    event_type="GATE_AUTO_APPROVED",
+                    event_type="GATE_CONFIRMATION_REQUIRED",
                     payload={
+                        "gate_event_id": gate_event_id,
                         "phase_id": phase.phase_id,
-                        "gate_type": phase.gate.gate_type,
-                        "description": phase.gate.description,
-                        "note": "Auto-approved in M1 — human confirmation in M2",
+                        "phase_name": phase.name,
+                        "gate_description": phase.gate.description,
+                        "confirm_command": f"confirm-{phase.phase_id}",
+                        "message": (
+                            f"[GATE] {phase.gate.description}. "
+                            f"Type confirm-{phase.phase_id} to proceed or skip-{phase.phase_id} to abort."
+                        ),
                     },
                 )
-            return True
+
+            # Wait for operator confirmation (poll the gate registry, max 5 min)
+            self._pending_gates[gate_event_id] = asyncio.Event()
+            try:
+                await asyncio.wait_for(
+                    self._pending_gates[gate_event_id].wait(),
+                    timeout=self._gate_timeout,
+                )
+                approved = self._gate_decisions.get(gate_event_id, False)
+            except asyncio.TimeoutError:
+                logger.warning("OmO: gate %s timed out — blocking phase", phase.phase_id)
+                approved = False
+            finally:
+                self._pending_gates.pop(gate_event_id, None)
+
+            return approved
 
         return True
+
+    def resolve_gate(self, gate_event_id: str, approved: bool) -> None:
+        """Called by ChatHandler when operator types confirm-X or skip-X."""
+        self._gate_decisions[gate_event_id] = approved
+        if gate_event_id in self._pending_gates:
+            self._pending_gates[gate_event_id].set()

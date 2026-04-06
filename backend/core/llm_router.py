@@ -1,12 +1,14 @@
 """LLM Router — Two-tier model routing with provider abstraction (Section 12).
 
-Primary:      Claude (claude-sonnet-4) for orchestration, reasoning, reports
-Cost fallback: Mistral (via Ollama) for compaction, classification, budget-exhausted mode
+Primary:      Ollama (qwen2.5:3b) — local-only mode (Claude disabled)
+Cost fallback: Same Ollama provider for compaction, classification, budget-exhausted mode
+
+When Claude is re-enabled, set CLAUDE_ENABLED=true in .env and provide a valid API key.
 
 TokenBudgetManager tracks usage and enforces thresholds:
-  60k  -> ConversationSummariser fires (Mistral)
+  60k  -> ConversationSummariser fires (Ollama)
   80%  -> TOKEN_BUDGET_WARNING published to EventBus
-  100% -> Mistral-only mode activated
+  100% -> budget-exhausted mode (same provider, just a flag)
 """
 
 from __future__ import annotations
@@ -139,20 +141,33 @@ class ClaudeProvider(LLMProvider):
         )
 
 
-class MistralOllamaProvider(LLMProvider):
-    """Mistral via Ollama — cost fallback tier."""
+# Keep old name as alias for backward compatibility in tests
+MistralOllamaProvider = None  # Will be set after OllamaProvider definition
+
+
+class OllamaProvider(LLMProvider):
+    """Ollama local provider — primary tier (local-only mode).
+
+    Used with qwen2.5:3b for:
+      - All orchestration, reasoning, and reports
+      - Session compaction summaries
+      - Cheap classification tasks
+      - Token-budget-exhausted mode
+    """
 
     def __init__(
         self,
         base_url: str | None = None,
-        model: str = "mistral:7b",
+        model: str = "qwen2.5:3b",
+        thinking_enabled: bool = False,
     ) -> None:
         self._base_url = base_url or os.environ.get("OLLAMA_HOST", "http://ollama:11434")
         self._model = model
+        self._thinking_enabled = thinking_enabled
         self._client = httpx.AsyncClient(timeout=120.0)
 
     def provider_name(self) -> str:
-        return "mistral"
+        return "ollama"
 
     async def complete(
         self,
@@ -165,16 +180,25 @@ class MistralOllamaProvider(LLMProvider):
         if system_prompt:
             api_messages.append({"role": "system", "content": system_prompt})
         for msg in messages:
-            api_messages.append({"role": msg.role, "content": msg.content})
+            content = msg.content
+            # Append /no_think tag for qwen3 models when thinking is disabled
+            if not self._thinking_enabled and msg.role == "user" and "qwen3" in self._model:
+                content = content.rstrip() + " /no_think"
+            api_messages.append({"role": msg.role, "content": content})
+
+        options: dict[str, Any] = {
+            "num_predict": max_tokens,
+            "temperature": temperature,
+        }
+        # Use correct 'think' key (not 'thinking') for Ollama thinking models
+        if self._thinking_enabled:
+            options["think"] = True
 
         body = {
             "model": self._model,
             "messages": api_messages,
             "stream": False,
-            "options": {
-                "num_predict": max_tokens,
-                "temperature": temperature,
-            },
+            "options": options,
         }
 
         resp = await self._client.post(
@@ -194,6 +218,10 @@ class MistralOllamaProvider(LLMProvider):
             finish_reason=data.get("done_reason", ""),
             raw=data,
         )
+
+
+# Backward compatibility alias
+MistralOllamaProvider = OllamaProvider
 
 
 class TokenBudgetManager:
@@ -253,24 +281,31 @@ class TokenBudgetManager:
 
 
 class LLMRouter:
-    """Routes LLM calls between Claude (primary) and Mistral (fallback).
+    """Routes LLM calls to Ollama (local-only mode, Claude disabled).
 
     Routing logic:
-      1. If budget exhausted -> Mistral only
-      2. If explicitly requesting compaction -> Mistral
-      3. Try Claude -> on failure, fallback to Mistral
-      4. Record token usage after each call
+      1. All requests go directly to Ollama/qwen2.5:3b
+      2. Record token usage after each call
+      3. To re-enable Claude, set CLAUDE_ENABLED=true in .env
     """
 
     def __init__(
         self,
         claude: ClaudeProvider | None = None,
-        mistral: MistralOllamaProvider | None = None,
+        fallback: OllamaProvider | None = None,
         budget_manager: TokenBudgetManager | None = None,
+        event_bus: Any = None,
+        # Legacy keyword for backward compatibility
+        mistral: OllamaProvider | None = None,
     ) -> None:
         self._claude = claude or ClaudeProvider()
-        self._mistral = mistral or MistralOllamaProvider()
+        self._fallback = fallback or mistral or OllamaProvider()
+        # Keep _mistral as alias for backward compat in tests
+        self._mistral = self._fallback
         self._budget = budget_manager or TokenBudgetManager()
+        self._event_bus = event_bus
+        # Check if Claude is explicitly enabled via env var
+        self._claude_enabled = os.environ.get("CLAUDE_ENABLED", "false").lower() == "true"
 
     @property
     def budget_manager(self) -> TokenBudgetManager:
@@ -283,6 +318,7 @@ class LLMRouter:
         temperature: float = 0.7,
         system_prompt: str | None = None,
         prefer_mistral: bool = False,
+        prefer_fallback: bool = False,
     ) -> LLMResponse:
         """Route an LLM completion request.
 
@@ -291,13 +327,14 @@ class LLMRouter:
             max_tokens: Max tokens for response.
             temperature: Sampling temperature.
             system_prompt: Optional system prompt.
-            prefer_mistral: Force Mistral (e.g., for compaction).
+            prefer_mistral: Force fallback (legacy alias).
+            prefer_fallback: Force fallback (e.g., for compaction).
         """
-        # Mistral-only mode or explicit preference
-        if self._budget.is_mistral_only or prefer_mistral:
-            return await self._call_mistral(messages, max_tokens, temperature, system_prompt)
+        # Claude disabled — route everything through Ollama
+        if not self._claude_enabled or self._budget.is_mistral_only or prefer_mistral or prefer_fallback:
+            return await self._call_fallback(messages, max_tokens, temperature, system_prompt)
 
-        # Try Claude primary
+        # Try Claude primary (only when explicitly enabled)
         try:
             response = await self._claude.complete(
                 messages, max_tokens, temperature, system_prompt,
@@ -305,21 +342,37 @@ class LLMRouter:
             await self._budget.record_usage(response.tokens_used)
             return response
         except Exception as exc:
-            logger.warning("LLMRouter: Claude failed, falling back to Mistral: %s", exc)
+            logger.warning("LLMRouter: Claude failed, falling back to %s: %s", self._fallback._model, exc)
 
-        # Fallback to Mistral
-        return await self._call_mistral(messages, max_tokens, temperature, system_prompt)
+            # Publish LLM_FALLBACK event so operator sees it (#9)
+            if self._event_bus:
+                await self._event_bus.publish(
+                    channel="system",
+                    event_type="LLM_FALLBACK",
+                    payload={
+                        "from_model": "claude",
+                        "to_model": self._fallback._model,
+                        "reason": str(exc)[:200],
+                        "note": "Responses may have reduced quality on complex tasks.",
+                    },
+                )
 
-    async def _call_mistral(
+        # Fallback
+        return await self._call_fallback(messages, max_tokens, temperature, system_prompt)
+
+    async def _call_fallback(
         self,
         messages: list[LLMMessage],
         max_tokens: int,
         temperature: float,
         system_prompt: str | None,
     ) -> LLMResponse:
-        """Call Mistral and record usage."""
-        response = await self._mistral.complete(
+        """Call Ollama provider (qwen2.5:3b) and record usage."""
+        response = await self._fallback.complete(
             messages, max_tokens, temperature, system_prompt,
         )
         await self._budget.record_usage(response.tokens_used)
         return response
+
+    # Backward compatibility alias
+    _call_mistral = _call_fallback
