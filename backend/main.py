@@ -327,7 +327,10 @@ def _resolve_findings(
 
 
 def _get_validated_reporter(fmt: str) -> IntelligentReporter:
-    """Return the reporter from state, raising HTTPException if unavailable or format invalid."""
+    """Return the reporter from state, raising HTTPException if unavailable or format invalid.
+
+    Note: validates fmt against REPORT_FORMATS allowlist — safe to use in response headers after this call.
+    """
     reporter: IntelligentReporter | None = _get("reporter")
     if reporter is None:
         raise HTTPException(status_code=503, detail="Reporter not initialized")
