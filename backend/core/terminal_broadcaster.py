@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class TerminalBroadcaster:
-    """Singleton that fans out structured terminal events to all /ws/terminal clients."""
+    """Fans out structured terminal events to all /ws/terminal clients."""
 
     def __init__(self) -> None:
         self._connections: list[WebSocket] = []
@@ -39,7 +39,8 @@ class TerminalBroadcaster:
         for ws in list(self._connections):
             try:
                 await ws.send_json(event)
-            except Exception:
+            except Exception as exc:
+                logger.debug("TerminalBroadcaster: send failed, dropping connection: %s", exc)
                 dead.append(ws)
         for ws in dead:
             self.disconnect(ws)
@@ -77,6 +78,6 @@ class TerminalLogHandler(logging.Handler):
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._broadcaster.publish(event))
             except RuntimeError:
-                pass  # no running loop (e.g., during tests without async context)
+                self.handleError(record)
         except Exception:
             self.handleError(record)

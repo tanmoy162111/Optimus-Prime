@@ -39,6 +39,7 @@ class TestTerminalBroadcaster:
         ws = AsyncMock()
         await broadcaster.connect(ws)
         assert ws in broadcaster._connections
+        ws.accept.assert_awaited_once()
 
     def test_disconnect_removes_websocket(self):
         broadcaster = TerminalBroadcaster()
@@ -80,10 +81,11 @@ class TestTerminalLogHandler:
         assert call_args["level"] == "INFO"
         assert call_args["logger"] == "backend.agents.recon_agent"
         assert "ReconAgent dispatching nmap" in call_args["data"]
+        assert call_args["ts"].endswith("Z")
 
     async def test_emit_does_not_raise_on_broadcaster_error(self):
+        """emit() must never raise, even if loop.create_task raises."""
         broadcaster = TerminalBroadcaster()
-        broadcaster.publish = AsyncMock(side_effect=Exception("boom"))
 
         handler = TerminalLogHandler(broadcaster)
         record = logging.LogRecord(
@@ -95,5 +97,16 @@ class TestTerminalLogHandler:
             args=(),
             exc_info=None,
         )
-        handler.emit(record)  # must not raise
-        await asyncio.sleep(0)
+
+        # Patch create_task to raise synchronously inside emit
+        import asyncio as _asyncio
+        original_get_loop = _asyncio.get_running_loop
+
+        class _FakeLoop:
+            def create_task(self, coro):
+                coro.close()  # prevent coroutine-never-awaited warning
+                raise RuntimeError("simulated loop error")
+
+        import unittest.mock as _mock
+        with _mock.patch("asyncio.get_running_loop", return_value=_FakeLoop()):
+            handler.emit(record)  # must not raise
