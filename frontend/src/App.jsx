@@ -44,6 +44,12 @@ const EVENT_ICONS = {
   ATTACK_MAPPED:        { icon: Target,        color: 'text-orange-400' },
 }
 
+const REPORT_FORMATS_UI = [
+  'executive', 'technical', 'remediation_roadmap',
+  'developer_handoff', 'compliance_mapping', 'regression',
+]
+const REPORT_FRAMEWORKS = ['NIST-CSF', 'PCI-DSS', 'GDPR', 'ISO27001', 'SOC2']
+
 const fmtTime = (iso) => {
   const d = new Date(iso || Date.now())
   return d.toLocaleTimeString('en-US', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' })
@@ -469,6 +475,47 @@ function EventFeed({ events }) {
 
 function FindingsPanel({ findings }) {
   const [selected, setSelected] = useState(null)
+  const [reportFormat, setReportFormat] = useState('executive')
+  const [reportFramework, setReportFramework] = useState('NIST-CSF')
+  const [downloading, setDownloading] = useState(null)
+  const [reportError, setReportError] = useState(null)
+
+  const triggerDownload = (blob, filename) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadReport = async (type) => {
+    setDownloading(type)
+    setReportError(null)
+    const filename = `report-${reportFormat}.${type}`
+    const url = type === 'json'
+      ? `${API_BASE}/report/${reportFormat}`
+      : `${API_BASE}/report/${reportFormat}/${type}`
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          findings: findings.length ? findings : undefined,
+          framework: reportFramework,
+        }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+        throw new Error(err.detail || resp.statusText)
+      }
+      triggerDownload(await resp.blob(), filename)
+    } catch (e) {
+      setReportError(e.message || 'Report generation failed')
+    } finally {
+      setDownloading(null)
+    }
+  }
 
   const sevOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
   const sorted = [...findings].sort((a, b) =>
@@ -496,6 +543,45 @@ function FindingsPanel({ findings }) {
           {findings.length === 0 && <span className="font-mono text-xs text-zinc-600">none</span>}
         </div>
       </div>
+
+      {/* Report download toolbar — only shown when findings exist */}
+      {findings.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 shrink-0 flex-wrap">
+          <select
+            value={reportFormat}
+            onChange={e => setReportFormat(e.target.value)}
+            className="input-field text-xs h-6 py-0 px-1.5"
+          >
+            {REPORT_FORMATS_UI.map(f => (
+              <option key={f} value={f}>{f.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+          <select
+            value={reportFramework}
+            onChange={e => setReportFramework(e.target.value)}
+            className="input-field text-xs h-6 py-0 px-1.5"
+          >
+            {REPORT_FRAMEWORKS.map(fw => (
+              <option key={fw} value={fw}>{fw}</option>
+            ))}
+          </select>
+          <div className="flex gap-1 ml-auto">
+            {['json', 'html', 'pdf'].map(type => (
+              <button
+                key={type}
+                onClick={() => downloadReport(type)}
+                disabled={downloading !== null}
+                className="font-mono text-xs px-2 h-6 border border-zinc-700 rounded hover:border-zinc-500 hover:text-zinc-200 text-zinc-400 transition-colors disabled:opacity-40"
+              >
+                {downloading === type ? '…' : `↓ ${type.toUpperCase()}`}
+              </button>
+            ))}
+          </div>
+          {reportError && (
+            <span className="font-mono text-xs text-red-400 w-full truncate">{reportError}</span>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         {/* Finding list */}
@@ -1056,10 +1142,25 @@ export default function App() {
 
   // Chat WebSocket handler
   const handleChatMessage = useCallback((data) => {
+    // Ignore control/handshake messages with no displayable content
+    if (!data.content && !data.plan && data.type !== 'engagement_complete') return
+
+    // Synthesise a human-readable message for engagement completion
+    let content = data.content || ''
+    if (data.type === 'engagement_complete') {
+      const status = data.status === 'completed' ? '✓ Engagement complete'
+        : data.status === 'partial' ? '⚠ Engagement partially complete'
+        : '✗ Engagement failed'
+      content = `${status} — ${data.total_findings ?? 0} finding(s)`
+      if (data.errors?.length) {
+        content += '\n\nErrors:\n' + data.errors.map(e => `• ${e.phase}: ${e.error}`).join('\n')
+      }
+    }
+
     setChatMessages(prev => [...prev, {
       role: 'assistant',
       type: data.type,
-      content: data.content || '',
+      content,
       metadata: data.metadata,
       plan: data.plan,
     }])
