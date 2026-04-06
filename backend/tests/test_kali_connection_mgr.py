@@ -340,6 +340,7 @@ class TestExponentialBackoff:
 class TestKaliConnectionManagerBroadcast:
     """Verify that execute() publishes stdout/stderr to TerminalBroadcaster."""
 
+    @pytest.mark.asyncio
     async def test_execute_broadcasts_stdout(self):
         from unittest.mock import AsyncMock, MagicMock, patch
         from backend.core.terminal_broadcaster import TerminalBroadcaster
@@ -377,7 +378,9 @@ class TestKaliConnectionManagerBroadcast:
         assert call_event["tool"] == "nmap"
         assert call_event["stream"] == "stdout"
         assert "scan complete" in call_event["data"]
+        assert "agent" in call_event  # field must be present (value is None when _agent_name not in tool_input)
 
+    @pytest.mark.asyncio
     async def test_execute_broadcasts_stderr_when_non_empty(self):
         from unittest.mock import AsyncMock, MagicMock, patch
         from backend.core.terminal_broadcaster import TerminalBroadcaster
@@ -411,6 +414,7 @@ class TestKaliConnectionManagerBroadcast:
         assert len(stderr_calls) == 1
         assert "permission denied" in stderr_calls[0]["data"]
 
+    @pytest.mark.asyncio
     async def test_execute_without_broadcaster_does_not_raise(self):
         """broadcaster=None (default) must be backward-compatible."""
         from unittest.mock import MagicMock, patch
