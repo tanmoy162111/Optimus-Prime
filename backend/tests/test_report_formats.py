@@ -285,11 +285,17 @@ def report_client():
     original = dict(main_module._state)
     main_module._state["reporter"] = reporter
 
-    client = TestClient(main_module.app, raise_server_exceptions=True)
-    yield client
+    # Disable lifespan to prevent it from overwriting _state["reporter"]
+    original_lifespan = main_module.app.router.lifespan
+    main_module.app.router.lifespan = None
 
-    main_module._state.clear()
-    main_module._state.update(original)
+    try:
+        client = TestClient(main_module.app, raise_server_exceptions=True)
+        yield client
+    finally:
+        main_module._state.clear()
+        main_module._state.update(original)
+        main_module.app.router.lifespan = original_lifespan
 
 
 class TestReportAPI:
