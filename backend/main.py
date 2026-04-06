@@ -326,6 +326,19 @@ def _resolve_findings(
     return reporter.confirmed_findings
 
 
+def _get_validated_reporter(fmt: str) -> IntelligentReporter:
+    """Return the reporter from state, raising HTTPException if unavailable or format invalid."""
+    reporter: IntelligentReporter | None = _get("reporter")
+    if reporter is None:
+        raise HTTPException(status_code=503, detail="Reporter not initialized")
+    if fmt not in REPORT_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown format. Valid: {', '.join(REPORT_FORMATS)}",
+        )
+    return reporter
+
+
 async def _prune_loop(event_bus: EventBus) -> None:
     """Prune old events every hour."""
     while True:
@@ -445,14 +458,7 @@ async def generate_report_json(
     Body: { findings?: list[dict], framework?: str }
     Uses body findings if non-empty; falls back to reporter accumulated findings.
     """
-    reporter: IntelligentReporter | None = _get("reporter")
-    if reporter is None:
-        raise HTTPException(status_code=503, detail="Reporter not initialized")
-    if fmt not in REPORT_FORMATS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown format. Valid: {', '.join(REPORT_FORMATS)}",
-        )
+    reporter = _get_validated_reporter(fmt)
     body = body or {}
     findings = _resolve_findings(body.get("findings") or [], reporter)
     return reporter.generate_report(
@@ -468,14 +474,7 @@ async def generate_report_html(
     body: dict[str, Any] | None = Body(default=None),
 ) -> Response:
     """Generate a report and return it as a downloadable HTML file."""
-    reporter: IntelligentReporter | None = _get("reporter")
-    if reporter is None:
-        raise HTTPException(status_code=503, detail="Reporter not initialized")
-    if fmt not in REPORT_FORMATS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown format. Valid: {', '.join(REPORT_FORMATS)}",
-        )
+    reporter = _get_validated_reporter(fmt)
     body = body or {}
     findings = _resolve_findings(body.get("findings") or [], reporter)
     report = reporter.generate_report(
@@ -488,6 +487,31 @@ async def generate_report_html(
         content=html.encode("utf-8"),
         media_type="text/html",
         headers={"Content-Disposition": f'attachment; filename="report-{fmt}.html"'},
+    )
+
+
+@app.post("/report/{fmt}/pdf")
+async def generate_report_pdf(
+    fmt: str,
+    body: dict[str, Any] | None = Body(default=None),
+) -> Response:
+    """Generate a report and return it as a downloadable PDF file.
+
+    Falls back to HTML bytes if WeasyPrint is not installed.
+    """
+    reporter = _get_validated_reporter(fmt)
+    body = body or {}
+    findings = _resolve_findings(body.get("findings") or [], reporter)
+    report = reporter.generate_report(
+        report_format=fmt,
+        framework=body.get("framework"),
+        findings=findings,
+    )
+    pdf_bytes = await reporter.export_pdf(report)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="report-{fmt}.pdf"'},
     )
 
 

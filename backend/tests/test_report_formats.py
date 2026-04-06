@@ -338,3 +338,11 @@ class TestReportAPI:
         assert 'filename="report-technical.html"' in resp.headers["content-disposition"]
         assert resp.content.startswith(b"<!DOCTYPE html>")
         assert b"Security Assessment Report" in resp.content
+
+    def test_pdf_download_content_and_headers(self, report_client):
+        resp = report_client.post("/report/executive/pdf", json={})
+        assert resp.status_code == 200
+        assert "application/pdf" in resp.headers["content-type"]
+        assert "attachment" in resp.headers["content-disposition"]
+        assert 'filename="report-executive.pdf"' in resp.headers["content-disposition"]
+        assert len(resp.content) > 0  # WeasyPrint fallback returns HTML bytes
