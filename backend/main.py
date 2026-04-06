@@ -61,6 +61,14 @@ from backend.intelligence.research_kb import ResearchKB
 from backend.intelligence.research_daemon import ResearchDaemon
 from backend.intelligence.strategy_evolution import StrategyEvolutionEngine
 from backend.intelligence.custom_tool_generator import CustomToolGenerator
+from backend.core.terminal_broadcaster import TerminalBroadcaster, TerminalLogHandler
+
+from pydantic import BaseModel
+
+
+class TerminalExecRequest(BaseModel):
+    command: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +144,15 @@ async def lifespan(app: FastAPI):
     )
     _state["tool_executor"] = tool_executor
 
+    # TerminalBroadcaster — initialized before KaliConnectionManager so it can be injected
+    terminal_broadcaster = TerminalBroadcaster()
+    _state["terminal_broadcaster"] = terminal_broadcaster
+
+    # Attach log handler to capture all backend.* log output
+    _terminal_log_handler = TerminalLogHandler(terminal_broadcaster)
+    _terminal_log_handler.setLevel(logging.DEBUG)
+    logging.getLogger("backend").addHandler(_terminal_log_handler)
+
     # KaliConnectionManager
     kali_mgr = KaliConnectionManager(
         host=os.environ.get("KALI_HOST", "kali"),
@@ -143,6 +160,7 @@ async def lifespan(app: FastAPI):
         username=os.environ.get("KALI_USER", "root"),
         password=os.environ.get("KALI_PASSWORD", "optimus"),
         event_bus=event_bus,
+        terminal_broadcaster=terminal_broadcaster,
     )
     _state["kali_mgr"] = kali_mgr
     # Eagerly initialize Kali connection pool at startup
@@ -311,6 +329,7 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+    logging.getLogger("backend").removeHandler(_terminal_log_handler)
     await kali_mgr.close()
     await event_bus.close()
     logger.info("Optimus Prime v2.0 — shutdown complete")
@@ -713,3 +732,85 @@ async def _execute_plan_background(
             })
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# WebSocket: Terminal stream
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/terminal")
+async def websocket_terminal(websocket: WebSocket):
+    """Fan out terminal events (Kali stdout/stderr + backend logs) to the dashboard."""
+    broadcaster: TerminalBroadcaster | None = _get("terminal_broadcaster")
+    if broadcaster is None:
+        await websocket.close(code=1011)
+        return
+    await broadcaster.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep-alive; client sends nothing
+    except WebSocketDisconnect:
+        broadcaster.disconnect(websocket)
+    except Exception:
+        broadcaster.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# REST: Operator manual shell command
+# ---------------------------------------------------------------------------
+
+@app.post("/terminal/exec")
+async def terminal_exec(body: TerminalExecRequest):
+    """Execute an operator-typed command on Kali SSH and broadcast the result."""
+    if not body.command.strip():
+        raise HTTPException(status_code=400, detail="command is empty")
+
+    kali_mgr: KaliConnectionManager | None = _get("kali_mgr")
+    broadcaster: TerminalBroadcaster | None = _get("terminal_broadcaster")
+
+    if kali_mgr is None:
+        raise HTTPException(status_code=503, detail="Kali SSH not initialized")
+
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if broadcaster:
+        await broadcaster.publish({
+            "type": "operator_input",
+            "source": "operator",
+            "data": body.command,
+            "ts": ts,
+        })
+
+    try:
+        async with kali_mgr._semaphore:
+            conn = await kali_mgr._get_healthy_connection()
+            stdout, stderr, exit_code = await asyncio.to_thread(
+                conn.exec_command, body.command, 60
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Kali SSH error: {exc}")
+
+    if broadcaster:
+        if stdout:
+            await broadcaster.publish({
+                "type": "kali_output",
+                "source": "kali",
+                "agent": None,
+                "tool": None,
+                "stream": "stdout",
+                "data": stdout,
+                "ts": ts,
+            })
+        if stderr:
+            await broadcaster.publish({
+                "type": "kali_output",
+                "source": "kali",
+                "agent": None,
+                "tool": None,
+                "stream": "stderr",
+                "data": stderr,
+                "ts": ts,
+            })
+
+    return {"stdout": stdout, "stderr": stderr, "exit_code": exit_code}

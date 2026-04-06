@@ -110,3 +110,23 @@ class TestTerminalLogHandler:
         import unittest.mock as _mock
         with _mock.patch("asyncio.get_running_loop", return_value=_FakeLoop()):
             handler.emit(record)  # must not raise
+
+
+class TestTerminalExecEndpoint:
+    """Integration tests for POST /terminal/exec."""
+
+    def test_empty_command_returns_400(self):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+
+        client = TestClient(app)
+        resp = client.post("/terminal/exec", json={"command": "  "})
+        assert resp.status_code == 400
+
+    def test_missing_command_field_returns_422(self):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+
+        client = TestClient(app)
+        resp = client.post("/terminal/exec", json={})
+        assert resp.status_code == 422
