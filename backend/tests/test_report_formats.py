@@ -288,6 +288,9 @@ def report_client():
     # Disable lifespan to prevent it from overwriting _state["reporter"]
     original_lifespan = main_module.app.router.lifespan
     main_module.app.router.lifespan = None
+    assert main_module.app.router.lifespan is None, (
+        "Failed to disable lifespan — Starlette internal structure may have changed"
+    )
 
     try:
         client = TestClient(main_module.app, raise_server_exceptions=True)
