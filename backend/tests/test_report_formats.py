@@ -266,3 +266,57 @@ class TestResolveFindingsHelper:
         result = _resolve_findings(None, reporter)
         assert len(result) == 1
         assert result[0]["title"] == "accumulated"
+
+
+# ---------------------------------------------------------------------------
+# API endpoint tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def report_client():
+    """TestClient with reporter pre-loaded; lifespan skipped."""
+    import backend.main as main_module
+    from fastapi.testclient import TestClient
+
+    reporter = IntelligentReporter()
+    for f in SAMPLE_FINDINGS:
+        reporter.add_finding(f)
+
+    original = dict(main_module._state)
+    main_module._state["reporter"] = reporter
+
+    client = TestClient(main_module.app, raise_server_exceptions=True)
+    yield client
+
+    main_module._state.clear()
+    main_module._state.update(original)
+
+
+class TestReportAPI:
+    """API-level tests for the three report endpoints."""
+
+    def test_json_report_all_formats(self, report_client):
+        for fmt in REPORT_FORMATS:
+            resp = report_client.post(f"/report/{fmt}", json={})
+            assert resp.status_code == 200, f"Failed for format {fmt}: {resp.text}"
+            data = resp.json()
+            assert data["format"] == fmt
+            assert "sections" in data
+            assert data["finding_count"] == len(SAMPLE_FINDINGS)
+
+    def test_json_hybrid_fallback_uses_reporter(self, report_client):
+        # Empty body findings → reporter accumulated findings are used
+        resp = report_client.post("/report/executive", json={})
+        assert resp.status_code == 200
+        assert resp.json()["finding_count"] == len(SAMPLE_FINDINGS)
+
+    def test_json_body_findings_override_reporter(self, report_client):
+        custom = [{"title": "Override finding", "severity": "critical"}]
+        resp = report_client.post("/report/technical", json={"findings": custom})
+        assert resp.status_code == 200
+        assert resp.json()["finding_count"] == 1
+
+    def test_invalid_format_returns_422(self, report_client):
+        resp = report_client.post("/report/nonexistent_format", json={})
+        assert resp.status_code == 422
+        assert "Unknown format" in resp.json()["detail"]

@@ -432,6 +432,37 @@ async def resolve_gate(action: str, gate_event_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Report endpoints (Section 16)
+# ---------------------------------------------------------------------------
+
+@app.post("/report/{fmt}")
+async def generate_report_json(
+    fmt: str,
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    """Generate a report in JSON format.
+
+    Body: { findings?: list[dict], framework?: str }
+    Uses body findings if non-empty; falls back to reporter accumulated findings.
+    """
+    reporter: IntelligentReporter | None = _get("reporter")
+    if reporter is None:
+        raise HTTPException(status_code=503, detail="Reporter not initialized")
+    if fmt not in REPORT_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown format. Valid: {', '.join(REPORT_FORMATS)}",
+        )
+    body = body or {}
+    findings = _resolve_findings(body.get("findings") or [], reporter)
+    return reporter.generate_report(
+        report_format=fmt,
+        framework=body.get("framework"),
+        findings=findings,
+    )
+
+
+# ---------------------------------------------------------------------------
 # WebSocket: Event stream with replay-on-reconnect (N7)
 # ---------------------------------------------------------------------------
 
