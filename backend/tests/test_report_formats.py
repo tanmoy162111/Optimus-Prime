@@ -329,3 +329,12 @@ class TestReportAPI:
         resp = report_client.post("/report/nonexistent_format", json={})
         assert resp.status_code == 422
         assert "Unknown format" in resp.json()["detail"]
+
+    def test_html_download_content_and_headers(self, report_client):
+        resp = report_client.post("/report/technical/html", json={"framework": "PCI-DSS"})
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "attachment" in resp.headers["content-disposition"]
+        assert 'filename="report-technical.html"' in resp.headers["content-disposition"]
+        assert resp.content.startswith(b"<!DOCTYPE html>")
+        assert b"Security Assessment Report" in resp.content

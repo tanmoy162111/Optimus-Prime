@@ -462,6 +462,35 @@ async def generate_report_json(
     )
 
 
+@app.post("/report/{fmt}/html")
+async def generate_report_html(
+    fmt: str,
+    body: dict[str, Any] | None = Body(default=None),
+) -> Response:
+    """Generate a report and return it as a downloadable HTML file."""
+    reporter: IntelligentReporter | None = _get("reporter")
+    if reporter is None:
+        raise HTTPException(status_code=503, detail="Reporter not initialized")
+    if fmt not in REPORT_FORMATS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown format. Valid: {', '.join(REPORT_FORMATS)}",
+        )
+    body = body or {}
+    findings = _resolve_findings(body.get("findings") or [], reporter)
+    report = reporter.generate_report(
+        report_format=fmt,
+        framework=body.get("framework"),
+        findings=findings,
+    )
+    html = reporter._render_html(report)
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="report-{fmt}.html"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # WebSocket: Event stream with replay-on-reconnect (N7)
 # ---------------------------------------------------------------------------
