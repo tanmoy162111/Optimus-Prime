@@ -62,6 +62,15 @@ from backend.intelligence.research_daemon import ResearchDaemon
 from backend.intelligence.strategy_evolution import StrategyEvolutionEngine
 from backend.intelligence.custom_tool_generator import CustomToolGenerator
 from backend.core.terminal_broadcaster import TerminalBroadcaster, TerminalLogHandler
+from backend.intelligence.source_adapters import (
+    NVDAdapter,
+    CISAKEVAdapter,
+    GitHubPoCAdapter,
+    MITREAttackAdapter,
+    BlogsAdapter,
+    ExploitDBAdapter,
+    DarkWebAdapter,
+)
 
 from pydantic import BaseModel
 
@@ -180,7 +189,12 @@ async def lifespan(app: FastAPI):
     from backend.tools.backends.ics_runtime_ipc import ICSRuntimeIPC
 
     tool_executor.register_backend("local", LocalSubprocessBackend())
-    tool_executor.register_backend("tor_socks5", TorSOCKS5Backend())
+    tor_backend = TorSOCKS5Backend(
+        tor_host=os.environ.get("TOR_SOCKS5_HOST", "tor"),
+        tor_port=int(os.environ.get("TOR_SOCKS5_PORT", "9050")),
+    )
+    tool_executor.register_backend("tor_socks5", tor_backend)
+    _state["tor_backend"] = tor_backend
     tool_executor.register_backend("sandbox", SandboxOnDemandBackend(
         dvwa_url=f"http://{os.environ.get('DVWA_HOST', 'sandbox')}:{os.environ.get('DVWA_PORT', '80')}",
     ))
@@ -271,7 +285,18 @@ async def lifespan(app: FastAPI):
         research_kb=research_kb,
         event_bus=event_bus,
     )
+
+    # Register source adapters
+    research_daemon.register_source("nvd",        NVDAdapter().fetch)
+    research_daemon.register_source("cisa_kev",   CISAKEVAdapter().fetch)
+    research_daemon.register_source("github_poc", GitHubPoCAdapter().fetch)
+    research_daemon.register_source("attack",     MITREAttackAdapter().fetch)
+    research_daemon.register_source("blogs",      BlogsAdapter().fetch)
+    research_daemon.register_source("exploitdb",  ExploitDBAdapter().fetch)
+    research_daemon.register_source("dark_web",   DarkWebAdapter(tor_backend=tor_backend).fetch)
+
     _state["research_daemon"] = research_daemon
+    logger.info("ResearchDaemon: registered 7 source adapters")
 
     # StrategyEvolutionEngine
     strategy_engine = StrategyEvolutionEngine(
@@ -279,6 +304,9 @@ async def lifespan(app: FastAPI):
         smart_memory=smart_memory,
     )
     _state["strategy_engine"] = strategy_engine
+
+    # Inject strategy_engine into EngineInfra (created before StrategyEvolutionEngine was ready)
+    engine_infra._strategy_engine = strategy_engine
 
     # CustomToolGenerator
     custom_tool_gen = CustomToolGenerator(
@@ -289,7 +317,7 @@ async def lifespan(app: FastAPI):
     _state["custom_tool_generator"] = custom_tool_gen
 
     # OmX Workflow Planner
-    omx = OmX(llm_router=llm_router)
+    omx = OmX(llm_router=llm_router, research_kb=research_kb)
     _state["omx"] = omx
 
     # OmO Coordinator
