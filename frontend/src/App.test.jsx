@@ -2,8 +2,10 @@ import { renderHook, act } from '@testing-library/react'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 // Flush all pending microtasks (replacement for vi.runAllMicrotasksAsync which is not available in Vitest 4.x)
-// Uses Promise.resolve() chains to drain the microtask queue without relying on fake timers
-const flushPromises = () => Promise.resolve().then(() => Promise.resolve()).then(() => Promise.resolve())
+// Uses a loop to drain the microtask queue safely for any async depth
+const flushPromises = async () => {
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+}
 
 // ─── WebSocket mock factory ───────────────────────────────────────────────────
 let lastWs = null
@@ -38,6 +40,10 @@ MockWebSocket.CLOSED = 3
 // ─── Inline copy of the NEW useWebSocket (matches what Task 3 will put in App.jsx) ─
 import { useState, useEffect, useRef, useCallback } from 'react'
 
+// TODO(Task 3): Delete this inline copy after App.jsx is updated.
+// This must remain identical to the useWebSocket in App.jsx,
+// except 'new WebSocket(url)' → 'new MockWebSocket(url)' and
+// WebSocket.OPEN/CLOSED/CONNECTING → MockWebSocket constants.
 function useWebSocket(url, onMessage, enabled = true) {
   const [connected, setConnected] = useState(false)
   const mountedRef = useRef(true)
@@ -191,16 +197,24 @@ describe('useWebSocket', () => {
     const onMessage = vi.fn()
     const { result } = renderHook(() => useWebSocket('ws://localhost/ws', onMessage))
 
+    // First health attempt fails immediately (catch branch)
     await act(async () => { await flushPromises() })
+    // Advance 1000ms for inter-attempt delay (i < 2, i=0)
+    await act(async () => { vi.advanceTimersByTime(1000); await flushPromises() })
+    // Advance 1000ms for inter-attempt delay (i < 2, i=1)
+    await act(async () => { vi.advanceTimersByTime(1000); await flushPromises() })
 
+    // All 3 health pings have now failed → no WebSocket created, backoff timer scheduled
     expect(lastWs).toBeNull()
     expect(result.current.connected).toBe(false)
 
+    // Advance 1100ms for first backoff delay (2^0 * 1000ms = 1000ms + buffer)
     await act(async () => {
       vi.advanceTimersByTime(1100)
       await flushPromises()
     })
 
+    // Still failing → still no WS
     expect(lastWs).toBeNull()
   })
 
@@ -278,5 +292,17 @@ describe('useWebSocket', () => {
     act(() => { lastWs._message({ seq: 42, event_type: 'SYSTEM_STARTED' }) })
 
     expect(onMessage).toHaveBeenCalledWith({ seq: 42, event_type: 'SYSTEM_STARTED' })
+  })
+
+  it('does not connect when enabled is false', async () => {
+    const onMessage = vi.fn()
+    const { result } = renderHook(() => useWebSocket('ws://localhost/ws', onMessage, false))
+
+    await act(async () => { await flushPromises() })
+
+    expect(lastWs).toBeNull()
+    expect(result.current.connected).toBe(false)
+    // No fetch calls either
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 })
