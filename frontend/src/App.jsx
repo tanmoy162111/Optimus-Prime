@@ -7,8 +7,9 @@ import {
 } from 'lucide-react'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const WS_BASE  = API_BASE.replace(/^http/, 'ws')
+// REST calls use relative paths — proxied by Vite to backend:8000
+// WebSocket uses window.location.host so it works on any deployment
+const WS_BASE = `ws://${window.location.host}`
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 const SEVERITY_MAP = {
@@ -480,7 +481,7 @@ function TerminalInput({ agentActive }) {
     setRunning(true)
     setError(null)
     try {
-      const resp = await fetch(`${API_BASE}/terminal/exec`, {
+      const resp = await fetch('/terminal/exec', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command }),
@@ -626,8 +627,8 @@ function FindingsPanel({ findings }) {
     setReportError(null)
     const filename = `report-${reportFormat}.${type}`
     const url = type === 'json'
-      ? `${API_BASE}/report/${reportFormat}`
-      : `${API_BASE}/report/${reportFormat}/${type}`
+      ? `/report/${reportFormat}`
+      : `/report/${reportFormat}/${type}`
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -1175,14 +1176,14 @@ export default function App() {
   // Fetch health + directives
   const fetchHealth = useCallback(async () => {
     try {
-      const r = await fetch(`${API_BASE}/health`)
+      const r = await fetch('/health')
       setHealth(await r.json())
     } catch { setHealth(null) }
   }, [])
 
   const fetchDirectives = useCallback(async () => {
     try {
-      const r = await fetch(`${API_BASE}/directives`)
+      const r = await fetch('/directives')
       const d = await r.json()
       setDirectives(d.directives || {})
     } catch {}
@@ -1344,7 +1345,7 @@ export default function App() {
   // Set scope
   const handleSetScope = useCallback(async (scopeData) => {
     try {
-      const r = await fetch(`${API_BASE}/scope`, {
+      const r = await fetch('/scope', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(scopeData),
@@ -1361,7 +1362,7 @@ export default function App() {
   // Resolve a human gate (confirm or skip)
   const handleGateResolve = useCallback(async (gateEventId, action) => {
     try {
-      await fetch(`${API_BASE}/gate/${action}/${gateEventId}`, { method: 'POST' })
+      await fetch(`/gate/${action}/${gateEventId}`, { method: 'POST' })
       setPendingGate(null)
     } catch (e) {
       console.error('Gate resolve failed:', e)
