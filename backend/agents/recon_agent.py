@@ -26,6 +26,7 @@ from backend.core.models import (
     FindingClassification,
     ScopeConfig,
 )
+from backend.agents.scan_agent import _extract_json_from_llm_response
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class ReconAgent(BaseAgent):
         )
 
         try:
-            data = json.loads(response.content)
+            data = _extract_json_from_llm_response(response.content, "ReconAgent")
         except json.JSONDecodeError:
             logger.warning("ReconAgent: LLM response not valid JSON, using fallback")
             return self._plan_fallback(task, target)
