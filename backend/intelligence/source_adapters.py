@@ -304,23 +304,28 @@ class BlogsAdapter:
         if last_run:
             headers["If-Modified-Since"] = last_run
 
-        async with _make_client() as client:
-            for feed_url in _RSS_FEEDS:
-                try:
-                    resp = await client.get(feed_url, headers=headers)
-                    if resp.status_code == 304:
-                        continue
-                    if resp.status_code != 200:
-                        logger.warning("BlogsAdapter: %s returned %d", feed_url, resp.status_code)
-                        continue
+        try:
+            async with _make_client() as client:
+                for feed_url in _RSS_FEEDS:
+                    try:
+                        resp = await client.get(feed_url, headers=headers)
+                        if resp.status_code == 304:
+                            continue
+                        if resp.status_code != 200:
+                            logger.warning("BlogsAdapter: %s returned %d", feed_url, resp.status_code)
+                            continue
 
-                    feed_entries = self._parse_rss(resp.text, feed_url)
-                    entries.extend(feed_entries)
+                        feed_entries = self._parse_rss(resp.text, feed_url)
+                        entries.extend(feed_entries)
 
-                except Exception as exc:
-                    logger.warning("BlogsAdapter: failed to fetch %s: %s", feed_url, exc)
+                    except Exception as exc:
+                        logger.warning("BlogsAdapter: failed to fetch %s: %s", feed_url, exc)
 
-        logger.info("BlogsAdapter: fetched %d blog entries", len(entries))
+            logger.info("BlogsAdapter: fetched %d blog entries", len(entries))
+        except Exception as exc:
+            logger.warning("BlogsAdapter: client creation/initialization failed: %s", exc)
+            return []
+
         return entries
 
     def _parse_rss(self, xml_text: str, feed_url: str) -> list[ResearchKBEntry]:
