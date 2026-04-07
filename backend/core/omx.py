@@ -336,8 +336,13 @@ class OmX:
     protocol templates. For natural language, delegates to LLMRouter.
     """
 
-    def __init__(self, llm_router: LLMRouter | None = None) -> None:
+    def __init__(
+        self,
+        llm_router: LLMRouter | None = None,
+        research_kb: Any = None,
+    ) -> None:
         self._llm = llm_router
+        self._research_kb = research_kb
 
     async def plan(
         self,
@@ -356,10 +361,13 @@ class OmX:
         directive = self._detect_directive(message)
 
         if directive:
-            return self._plan_from_directive(directive, message, scope)
+            plan = self._plan_from_directive(directive, message, scope)
+        else:
+            # No directive found — use LLM for decomposition
+            plan = await self._plan_from_natural_language(message, scope)
 
-        # No directive found — use LLM for decomposition
-        return await self._plan_from_natural_language(message, scope)
+        await self._enrich_plan_with_kb(plan, scope)
+        return plan
 
     def _detect_directive(self, message: str) -> str | None:
         """Extract a known directive keyword from the message."""
@@ -491,6 +499,51 @@ class OmX:
     def get_available_directives(self) -> dict[str, str]:
         """Return all supported directives and their descriptions."""
         return dict(DIRECTIVE_DESCRIPTIONS)
+
+    async def _enrich_plan_with_kb(
+        self,
+        plan: "EngagementPlan",
+        scope: "ScopeConfig | None",
+    ) -> None:
+        """Query ResearchKB and inject matching CVEs into plan.metadata."""
+        if self._research_kb is None:
+            return
+
+        target = ""
+        if scope and scope.targets:
+            target = scope.targets[0]
+        if not target:
+            return
+
+        try:
+            entries = await self._research_kb.query(keyword=target, limit=5)
+            if not entries:
+                return
+
+            lines = ["Known CVEs/PoCs from ResearchKB:"]
+            for e in entries:
+                parts = []
+                if e.cve_id:
+                    parts.append(e.cve_id)
+                if e.cvss_score is not None:
+                    parts.append(f"CVSS:{e.cvss_score}")
+                if e.description:
+                    parts.append(e.description[:120])
+                if e.poc_url:
+                    parts.append(f"PoC:{e.poc_url}")
+                lines.append("  - " + " | ".join(parts))
+
+            plan.metadata["research_context"] = "\n".join(lines)
+            logger.info(
+                "OmX: injected %d KB entries into plan %s",
+                len(entries),
+                plan.plan_id,
+            )
+
+        except Exception as exc:
+            logger.warning(
+                "OmX: KB enrichment failed, proceeding without context: %s", exc
+            )
 
 
 def _extract_targets_from_message(message: str) -> list[str]:
