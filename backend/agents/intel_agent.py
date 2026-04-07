@@ -36,11 +36,60 @@ class IntelAgent(BaseAgent):
     )
     max_iterations: int = 15
     llm_router: LLMRouter | None = None
+    strategy_engine: Any = None
     _action_history: list[dict[str, Any]] = field(default_factory=list)
 
     async def execute(self, task: AgentTask) -> AgentResult:
         self._action_history = []
-        return await self.run_loop(task)
+        result = await self.run_loop(task)
+        await self._post_run_enrich(result)
+        return result
+
+    async def _post_run_enrich(self, result: AgentResult) -> None:
+        """Enrich findings with StrategyEvolutionEngine after run_loop completes."""
+        if self.strategy_engine is None:
+            return
+
+        findings = getattr(result, "findings", []) or []
+        if not findings:
+            return
+
+        try:
+            from backend.intelligence.strategy_evolution import AttackChain, ChainNode
+
+            nodes = []
+            for i, finding in enumerate(findings):
+                cve_id = finding.get("cve_id") if isinstance(finding, dict) else None
+                title = (
+                    finding.get("title", "") if isinstance(finding, dict)
+                    else getattr(finding, "title", "")
+                )
+                tool = (
+                    finding.get("tool_used", "") if isinstance(finding, dict)
+                    else getattr(finding, "tool_used", "")
+                )
+                nodes.append(ChainNode(
+                    step_id=f"intel-{i}",
+                    technique=title or "unknown",
+                    cve_id=cve_id,
+                    tool=tool or None,
+                ))
+
+            chain = AttackChain(
+                chain_id=f"intel-chain-{id(result)}",
+                nodes=nodes,
+                target=str(self.scope.targets[0]) if self.scope and self.scope.targets else "",
+            )
+
+            enriched = await self.strategy_engine.enrich_chain(chain)
+            logger.info(
+                "IntelAgent: enriched %d/%d nodes with KB intel",
+                enriched.enrichment_count,
+                len(nodes),
+            )
+
+        except Exception as exc:
+            logger.warning("IntelAgent: post-run enrichment failed (non-fatal): %s", exc)
 
     async def _plan_next_action(self, task: AgentTask) -> AgentAction | None:
         target = _extract_target(task.prompt, scope=self.scope)
