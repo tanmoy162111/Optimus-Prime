@@ -25,7 +25,7 @@ POOL_SIZE = 3
 MAX_RECONNECT_ATTEMPTS = 2       # Reduced from 5 — fail fast, let circuit breaker handle retries
 RECONNECT_BASE_DELAY = 1.0       # Reduced from 2s
 RECONNECT_MAX_DELAY = 5.0        # Reduced from 30s
-COMMAND_TIMEOUT = 300            # default per-command timeout
+COMMAND_TIMEOUT = 3600           # last-resort Python-side backstop only; per-tool limits via Kali timeout prefix
 SSH_CONNECT_TIMEOUT = 5          # per-attempt SSH connect timeout (was 10s)
 CIRCUIT_BREAKER_COOLDOWN = 60.0  # seconds before retrying after total pool failure
 HEALTH_CHECK_TIMEOUT = 2.0       # max seconds for a health check — bounds lock hold time
@@ -282,6 +282,29 @@ class KaliConnectionManager:
                     "exit_code": -1,
                 }
 
+            # Detect "command not found" (exit 127) — return a clear error so
+            # agents can skip the tool rather than treating it as a normal failure.
+            if exit_code == 127 or (
+                exit_code != 0
+                and stderr
+                and ("command not found" in stderr.lower() or "not found" in stderr.lower())
+            ):
+                logger.warning(
+                    "KaliConnectionManager: tool '%s' not found on Kali — exit %d: %s",
+                    tool_name, exit_code, stderr[:200],
+                )
+                return {
+                    "status": "tool_not_found",
+                    "tool": tool_name,
+                    "error": (
+                        f"Tool '{tool_name}' is not installed or not in PATH on Kali. "
+                        f"stderr: {stderr[:200]}"
+                    ),
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "exit_code": exit_code,
+                }
+
             if self._terminal_broadcaster is not None:
                 from datetime import datetime, timezone
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -329,23 +352,67 @@ class KaliConnectionManager:
         if raw_command:
             return raw_command
 
-        # Tool-specific command builders
+        # Tool-specific command builders (with Kali-side timeout prefixes)
         builders = {
-            "nmap": lambda: f"nmap {flags} {f'-p {port}' if port else ''} {target}".strip(),
-            "nmap_verify": lambda: f"nmap -sV --open -p {port} {target}".strip(),
-            "whatweb": lambda: f"whatweb {flags} {target}".strip(),
-            "dnsrecon": lambda: f"dnsrecon -d {target} {flags}".strip(),
-            "sublist3r": lambda: f"sublist3r -d {target} {flags}".strip(),
-            "amass": lambda: f"amass enum -d {target} {flags}".strip(),
-            "nikto": lambda: f"nikto -h {target} {f'-p {port}' if port else ''} {flags}".strip(),
-            "nuclei": lambda: f"nuclei -u {target} {flags}".strip(),
-            "masscan": lambda: f"masscan {target} {f'-p{port}' if port else '-p1-65535'} {flags}".strip(),
-            "wpscan": lambda: f"wpscan --url {target} {flags}".strip(),
-            "sqlmap": lambda: f"sqlmap -u {target} {flags} --batch".strip(),
-            "dalfox": lambda: f"dalfox url {target} {flags}".strip(),
-            "ffuf": lambda: f"ffuf -u {target} {flags}".strip(),
-            "testssl": lambda: f"testssl {flags} {target}".strip(),
-            "testssl_readonly": lambda: f"testssl --read-only {target}".strip(),
+            # --- Reconnaissance ---
+            "nmap": lambda: f"timeout 180 nmap {flags} {f'-p {port}' if port else ''} {target}".strip(),
+            "nmap_verify": lambda: f"timeout 30 nmap -sV --open -p {port} {target}".strip(),
+            "whatweb": lambda: f"timeout 30 whatweb {flags} {target}".strip(),
+            "dnsrecon": lambda: f"timeout 60 dnsrecon -d {target} {flags}".strip(),
+            "sublist3r": lambda: f"timeout 60 sublist3r -d {target} {flags}".strip(),
+            "amass": lambda: f"timeout 120 amass enum -d {target} {flags}".strip(),
+            # --- Scope discovery ---
+            "crt_sh": lambda: (
+                f"timeout 15 curl -sk 'https://crt.sh/?q={target}&output=json' "
+                f"| python3 -c \""
+                f"import sys,json; data=json.load(sys.stdin); "
+                f"[print(e.get('name_value','')) for e in data[:100]]\""
+                f" 2>/dev/null || timeout 15 curl -sk 'https://crt.sh/?q={target}'"
+            ).strip(),
+            "whois": lambda: f"timeout 15 whois {target} 2>/dev/null || echo 'whois: {target}'".strip(),
+            "dns_enum": lambda: (
+                f"(timeout 30 dig +noall +answer {target} ANY 2>/dev/null; "
+                f"timeout 10 dig +noall +answer {target} MX 2>/dev/null; "
+                f"timeout 10 dig +noall +answer {target} NS 2>/dev/null; "
+                f"timeout 10 host {target} 2>/dev/null) | sort -u"
+            ).strip(),
+            "github_scan": lambda: (
+                f"timeout 15 curl -sk 'https://api.github.com/search/repositories"
+                f"?q={target}+in:name,description&per_page=10' 2>/dev/null"
+            ).strip(),
+            "shodan": lambda: (
+                f"timeout 15 curl -sk 'https://internetdb.shodan.io/{target}' 2>/dev/null "
+                f"|| timeout 15 shodan host {target} 2>/dev/null "
+                f"|| echo '{{\"error\": \"shodan unavailable for {target}\"}}'"
+            ).strip(),
+            # --- Vulnerability scanning ---
+            "nikto": lambda: f"timeout 90 nikto -maxtime 90 -h {target} {f'-p {port}' if port else ''} {flags}".strip(),
+            "nuclei": lambda: f"timeout 60 nuclei -u {target} {flags}".strip(),
+            "masscan": lambda: f"timeout 120 masscan {target} {f'-p{port}' if port else '-p1-65535'} {flags}".strip(),
+            "wpscan": lambda: f"timeout 90 wpscan --url {target} {flags}".strip(),
+            # --- Exploitation ---
+            "sqlmap": lambda: f"timeout 180 sqlmap -u {target} {flags} --batch".strip(),
+            "dalfox": lambda: f"timeout 60 dalfox url {target} {flags}".strip(),
+            "ffuf": lambda: f"timeout 90 ffuf -u {target} {flags}".strip(),
+            "commix": lambda: f"timeout 120 commix --url={target} {flags} --batch 2>/dev/null".strip(),
+            "payload_crafter": lambda: (
+                f"timeout 60 msfvenom {flags} 2>/dev/null || echo 'payload_crafter: msfvenom unavailable'"
+            ).strip(),
+            "msfconsole": lambda: (
+                f"timeout 300 msfconsole -q -x '{raw_command}' 2>/dev/null"
+                if raw_command else
+                "echo 'msfconsole: no command provided'"
+            ).strip(),
+            # --- TLS / HTTP probes ---
+            "testssl": lambda: f"timeout 60 testssl {flags} {target}".strip(),
+            "testssl_readonly": lambda: f"timeout 60 testssl --read-only {target}".strip(),
+            "curl": lambda: f"timeout 15 curl -sk {flags} '{target}' 2>/dev/null".strip(),
+            "httpx_probe": lambda: (
+                f"timeout 15 curl -sk -o /dev/null -w '%{{http_code}} %{{url_effective}}\\n' '{target}' 2>/dev/null"
+            ).strip(),
+            # --- ToolFallbackResolver install/query commands (bypass registry) ---
+            "_install": lambda: raw_command or "echo 'install: no command'",
+            "_web_query": lambda: raw_command or "echo 'web_query: no command'",
         }
 
         builder = builders.get(tool_name)
