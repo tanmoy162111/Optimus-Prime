@@ -63,3 +63,23 @@ class TestKaliSideTimeouts:
         mgr = KaliConnectionManager.__new__(KaliConnectionManager)
         cmd = mgr._build_command("wpscan", {"target": "http://10.0.0.1", "flags": ""})
         assert cmd.startswith("timeout 90"), f"wpscan must have 'timeout 90' prefix, got: {cmd}"
+
+
+class TestNewIntelBuilders:
+    """Verify cve_search and exploit_db command builders are present."""
+
+    def test_cve_search_builder_exists(self):
+        """cve_search tool generates a curl command."""
+        from backend.tools.backends.kali_ssh import KaliConnectionManager
+        import inspect
+        src = inspect.getsource(KaliConnectionManager._build_command)
+        assert "cve_search" in src
+        assert "cve.circl.lu" in src
+
+    def test_exploit_db_builder_exists(self):
+        """exploit_db tool generates a searchsploit command."""
+        from backend.tools.backends.kali_ssh import KaliConnectionManager
+        import inspect
+        src = inspect.getsource(KaliConnectionManager._build_command)
+        assert "exploit_db" in src
+        assert "searchsploit" in src

@@ -385,6 +385,16 @@ class KaliConnectionManager:
                 f"|| timeout 15 shodan host {target} 2>/dev/null "
                 f"|| echo '{{\"error\": \"shodan unavailable for {target}\"}}'"
             ).strip(),
+            "cve_search": lambda: (
+                f"timeout 20 curl -sk "
+                f"'https://cve.circl.lu/api/cve/{tool_input.get('target', target)}' "
+                f"2>/dev/null || echo '{{}}'"
+            ).strip(),
+            "exploit_db": lambda: (
+                f"timeout 30 searchsploit --json {target} 2>/dev/null "
+                f"|| timeout 30 searchsploit {target} 2>/dev/null "
+                f"|| echo '{{\"RESULTS_EXPLOIT\": []}}'"
+            ).strip(),
             # --- Vulnerability scanning ---
             "nikto": lambda: f"timeout 90 nikto -maxtime 90 -h {target} {f'-p {port}' if port else ''} {flags}".strip(),
             "nuclei": lambda: f"timeout 60 nuclei -u {target} {flags}".strip(),
