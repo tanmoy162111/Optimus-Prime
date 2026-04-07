@@ -70,9 +70,23 @@ class EngagementPlan:
 # Protocol templates
 # ---------------------------------------------------------------------------
 
-def _pentest_phases() -> list[EngagementPhase]:
-    """Full penetration test protocol (Section 3.1.1)."""
-    return [
+def _pentest_phases(exploit_mode: str = "controlled") -> list[EngagementPhase]:
+    """Full penetration test protocol with two-phase exploitation.
+
+    Default flow:
+      scope → recon → scan → exploit_controlled [human gate] →
+      exploit_full [human gate] → verify → intel → report
+
+    With --freehand:
+      scope → recon → scan → exploit_full [human gate] → verify → intel → report
+
+    Args:
+        exploit_mode: ``"controlled"`` (default, two-phase) or ``"full"``
+            (freehand — skips controlled phase, goes straight to full).
+    """
+    mode = exploit_mode.lower()
+
+    base_phases = [
         EngagementPhase(
             phase_id="scope", name="Scope Discovery",
             description="Discover and validate engagement scope boundaries",
@@ -90,18 +104,53 @@ def _pentest_phases() -> list[EngagementPhase]:
             agent_types=[AgentType.SCAN],
             depends_on=["recon"],
         ),
-        EngagementPhase(
-            phase_id="exploit", name="Exploitation",
-            description="Controlled exploitation of confirmed vulnerabilities",
-            agent_types=[AgentType.EXPLOIT],
-            depends_on=["scan"],
-            gate=PhaseGate("human", "Operator approval required before exploitation"),
-        ),
+    ]
+
+    if mode == "full":
+        # Freehand: single FULL exploit phase, no CONTROLLED phase
+        exploit_phases = [
+            EngagementPhase(
+                phase_id="exploit_full", name="Full Exploitation (Freehand)",
+                description="Aggressive exploitation of all discovered services — FREEHAND mode",
+                agent_types=[AgentType.EXPLOIT],
+                depends_on=["scan"],
+                gate=PhaseGate("human", "Operator approval required before freehand exploitation"),
+                metadata={"exploit_mode": "full"},
+            ),
+        ]
+        verify_depends = ["exploit_full"]
+    else:
+        # Default: CONTROLLED first, then human gate before FULL escalation
+        exploit_phases = [
+            EngagementPhase(
+                phase_id="exploit_controlled", name="Exploitation (Controlled)",
+                description="Controlled exploitation of confirmed vulnerabilities only",
+                agent_types=[AgentType.EXPLOIT],
+                depends_on=["scan"],
+                gate=PhaseGate("human", "Operator approval required before controlled exploitation"),
+                metadata={"exploit_mode": "controlled"},
+            ),
+            EngagementPhase(
+                phase_id="exploit_full", name="Exploitation (Full Escalation)",
+                description="Full freehand exploitation — operator escalation from CONTROLLED",
+                agent_types=[AgentType.EXPLOIT],
+                depends_on=["exploit_controlled"],
+                gate=PhaseGate(
+                    "human",
+                    "CONTROLLED exploitation complete. Escalate to FULL freehand mode? "
+                    "Type confirm-exploit_full to proceed or skip-exploit_full to skip.",
+                ),
+                metadata={"exploit_mode": "full"},
+            ),
+        ]
+        verify_depends = ["exploit_full"]
+
+    tail_phases = [
         EngagementPhase(
             phase_id="verify", name="Verification",
             description="Independent verification of all findings",
             agent_types=[AgentType.VERIFICATION_LOOP],
-            depends_on=["exploit"],
+            depends_on=verify_depends,
         ),
         EngagementPhase(
             phase_id="intel", name="Attribution & Intelligence",
@@ -112,10 +161,12 @@ def _pentest_phases() -> list[EngagementPhase]:
         EngagementPhase(
             phase_id="report", name="Reporting",
             description="Generate comprehensive security assessment report",
-            agent_types=[],  # Report generation handled by OmX itself
+            agent_types=[],
             depends_on=["intel"],
         ),
     ]
+
+    return base_phases + exploit_phases + tail_phases
 
 
 def _recon_phases() -> list[EngagementPhase]:
@@ -323,13 +374,35 @@ class OmX:
         message: str,
         scope: ScopeConfig | None,
     ) -> EngagementPlan:
-        """Build a plan from a known directive template."""
+        """Build a plan from a known directive template.
+
+        Supported flags (appended after the directive keyword):
+          --exploit=full | --exploit=controlled | --freehand
+        """
         phase_builder = DIRECTIVE_PROTOCOLS.get(directive)
         if not phase_builder:
             raise ValueError(f"Unknown directive: {directive}")
 
-        phases = phase_builder()
+        # Parse exploit mode flag
+        msg_lower = message.lower()
+        if "--freehand" in msg_lower or "--exploit=full" in msg_lower:
+            exploit_mode = "full"
+        elif "--exploit=controlled" in msg_lower:
+            exploit_mode = "controlled"
+        else:
+            exploit_mode = "controlled"
+
+        # Pass exploit_mode only to builders that support it ($pentest)
+        import inspect
+        sig = inspect.signature(phase_builder)
+        if "exploit_mode" in sig.parameters:
+            phases = phase_builder(exploit_mode=exploit_mode)
+        else:
+            phases = phase_builder()
+
         description = DIRECTIVE_DESCRIPTIONS.get(directive, directive)
+        if directive == "$pentest" and exploit_mode == "full":
+            description += " [FREEHAND exploitation mode]"
 
         # Auto-build scope from targets found in the message if no scope provided
         if scope is None or not scope.targets:
