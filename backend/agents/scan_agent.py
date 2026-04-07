@@ -132,6 +132,78 @@ def _extract_target(prompt: str, scope=None) -> str:
     return prompt.strip()
 
 
+def _extract_json_from_llm_response(content: str, agent_name: str) -> dict:
+    """Extract a JSON object from an LLM response that may contain prose or markdown.
+
+    Tries strategies in order:
+      1. Direct JSON parse (clean response).
+      2. Extract from ```json ... ``` or ``` ... ``` code block.
+      3. Grab the first {...} substring (ignoring surrounding prose).
+      4. Strip single-quote wrapper and retry.
+      5. Return safe default — is_terminal=False, tool=None — so the agent
+         loop continues to its fallback planner rather than crashing.
+
+    Never raises JSONDecodeError. Always returns a dict.
+    """
+    import re as _re
+
+    content = (content or "").strip()
+
+    if not content:
+        return {"tool": None, "input": {}, "reasoning": "Empty LLM response", "is_terminal": False}
+
+    # Strategy 1: direct parse
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: code block
+    block_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, _re.DOTALL)
+    if block_match:
+        try:
+            return json.loads(block_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: first {...} substring (handles prose before/after JSON)
+    brace_match = _re.search(r'\{.*\}', content, _re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: single-quote wrapper (some LLMs wrap with single quotes)
+    stripped = content.strip("'")
+    if stripped != content:
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            pass
+        # Try replacing single quotes with double quotes (non-standard LLM output)
+        try:
+            import ast
+            parsed = ast.literal_eval(stripped)
+            if isinstance(parsed, dict):
+                return parsed
+        except (ValueError, SyntaxError):
+            pass
+
+    # Strategy 5: safe default — agent loop continues via _plan_fallback
+    logger.warning(
+        "_extract_json_from_llm_response (%s): no valid JSON found — returning safe default. "
+        "Response (first 200 chars): %.200s",
+        agent_name, content,
+    )
+    return {
+        "tool": None,
+        "input": {},
+        "reasoning": "LLM response could not be parsed as JSON — using fallback planner",
+        "is_terminal": False,
+    }
+
+
 async def _plan_with_llm(agent, task, target, system_prompt) -> AgentAction | None:
     history = "\n".join(
         f"{i+1}. {a['tool']}({a['input']})" for i, a in enumerate(agent._action_history)
@@ -147,20 +219,8 @@ async def _plan_with_llm(agent, task, target, system_prompt) -> AgentAction | No
             return agent._plan_fallback(target)
         return None
     try:
-        # Try to extract JSON from the response (LLM may wrap it in markdown)
-        content = response.content.strip()
-        if "```" in content:
-            # Extract JSON from code block
-            import re as _re
-            json_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, _re.DOTALL)
-            if json_match:
-                content = json_match.group(1)
-        data = json.loads(content)
+        data = _extract_json_from_llm_response(response.content, agent.__class__.__name__)
     except json.JSONDecodeError:
-        logger.warning(
-            "LLM returned non-JSON response for %s, falling back to deterministic plan: %.200s",
-            agent.__class__.__name__, response.content,
-        )
         if hasattr(agent, '_plan_fallback'):
             return agent._plan_fallback(target)
         return None
