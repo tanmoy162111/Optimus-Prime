@@ -142,12 +142,14 @@ class EngineInfra(EngineInterface):
         xai_logger: Any = None,
         kali_mgr: Any = None,
         llm_router: Any = None,
+        strategy_engine: Any = None,
     ) -> None:
         self._tool_executor = tool_executor
         self._event_bus = event_bus
         self._xai_logger = xai_logger
         self._kali_mgr = kali_mgr
         self._llm_router = llm_router
+        self._strategy_engine = strategy_engine
 
     async def dispatch(self, task: EngineTask) -> EngineResult:
         """Dispatch a task to the appropriate agent within this engine."""
@@ -194,6 +196,10 @@ class EngineInfra(EngineInterface):
 
             if self._xai_logger:
                 agent.xai_logger = self._xai_logger
+
+            # Inject strategy_engine into IntelAgent
+            if agent_class_name == "intel" and self._strategy_engine:
+                agent.strategy_engine = self._strategy_engine
 
             # Create AgentTask from EngineTask
             from backend.core.models import AgentTask
