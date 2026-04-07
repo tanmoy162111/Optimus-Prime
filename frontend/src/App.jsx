@@ -119,7 +119,7 @@ function useWebSocket(url, onMessage, enabled = true) {
           if (res.ok) { healthy = true; break }
         } catch {}
         if (!mountedRef.current) return
-        if (i < 2) await new Promise(r => setTimeout(r, 1000))
+        if (i < 2) await new Promise(r => { timerRef.current = setTimeout(r, 1000) })
       }
       if (!mountedRef.current) return
       if (!healthy) {
@@ -141,7 +141,7 @@ function useWebSocket(url, onMessage, enabled = true) {
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data)
-            if (data.seq) lastSeq.current = data.seq
+            if (data.seq != null) lastSeq.current = data.seq
             onMessageRef.current(data)
           } catch {}
         }
@@ -178,7 +178,7 @@ function useWebSocket(url, onMessage, enabled = true) {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       wsRef.current?.close()
     }
-  }, [url, enabled])
+  }, [url])
 
   return { connected, send }
 }
