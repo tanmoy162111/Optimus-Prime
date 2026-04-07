@@ -194,25 +194,35 @@ class VerificationLoop:
     ) -> FindingClassification:
         """Classify a finding based on verification result.
 
-        Heuristics:
-          - Tool returned success + output contains evidence -> CONFIRMED
-          - Tool returned error or empty -> FALSE_POSITIVE
-          - Ambiguous -> MANUAL_REVIEW
+        Distinguishes tool infrastructure failure from finding absence:
+          - Tool failure (SSH error, tool not found, timeout) → MANUAL_REVIEW
+            (finding neither confirmed nor refuted — needs operator review)
+          - Tool ran, no evidence found → FALSE_POSITIVE
+          - Tool ran, evidence found → CONFIRMED
         """
         status = result.get("status", "")
         output = result.get("output", result.get("stdout", ""))
         error = result.get("error", "")
 
+        # Infrastructure failure: tool could not run — do NOT mark as false positive.
+        # The finding is neither confirmed nor refuted.
         if status == "error" and error:
+            _infra_keywords = (
+                "connection", "unreachable", "timeout", "timed out",
+                "not found", "tool_not_found", "ssh", "refused", "reset",
+            )
+            if any(kw in error.lower() for kw in _infra_keywords):
+                return FindingClassification.MANUAL_REVIEW
+            # Generic error with no output — still can't confirm the finding is false
+            if not output:
+                return FindingClassification.MANUAL_REVIEW
+
+        # Tool ran but produced no output → no evidence → false positive
+        if not output:
             return FindingClassification.FALSE_POSITIVE
 
-        if not output:
-            return FindingClassification.MANUAL_REVIEW
-
         # Check for evidence of the finding being real
-        target = finding.get("target", "")
         port = finding.get("port")
-
         output_lower = output.lower() if isinstance(output, str) else ""
 
         # Port verification: check if port appears open in output
@@ -223,7 +233,7 @@ class VerificationLoop:
         if any(indicator in output_lower for indicator in ("200", "http/", "html", "server:", "open")):
             return FindingClassification.CONFIRMED
 
-        # If we got output but no clear indicators
+        # Output present but no clear indicators → give benefit of the doubt
         if len(output_lower) > 10:
             return FindingClassification.CONFIRMED
 
