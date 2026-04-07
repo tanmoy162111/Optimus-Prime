@@ -270,7 +270,7 @@ class TestOmXIntegration:
         plan = await omx.plan("$pentest target.com")
 
         assert plan.directive == "$pentest"
-        assert plan.phase_count() == 7
+        assert plan.phase_count() == 8
         assert AgentType.RECON in plan.agent_types_involved()
         assert AgentType.EXPLOIT in plan.agent_types_involved()
 

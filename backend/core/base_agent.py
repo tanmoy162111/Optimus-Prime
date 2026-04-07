@@ -107,6 +107,7 @@ class BaseAgent(ABC):
     xai_logger: XAILogger = field(default_factory=XAILogger)
     kali_mgr: Any = None  # KaliConnectionManager — injected at runtime (v2.0)
     llm_router: Any = None  # LLMRouter — injected at runtime
+    _tool_fallback_resolver: Any = field(default=None, repr=False)
 
     @abstractmethod
     async def execute(self, task: AgentTask) -> AgentResult:
@@ -157,6 +158,55 @@ class BaseAgent(ABC):
 
             # Execute with full permission pipeline
             result = await self._execute_with_permissions(action)
+
+            # Intercept tool_not_found — attempt fallback resolution before skipping
+            if (
+                result.success
+                and isinstance(result.output, dict)
+                and result.output.get("status") == "tool_not_found"
+                and self._tool_fallback_resolver is not None
+            ):
+                resolution = await self._tool_fallback_resolver.resolve(
+                    tool_name=action.tool_name,
+                    tool_input=action.tool_input,
+                    error=result.output.get("error", ""),
+                )
+
+                if resolution.alternative_tool:
+                    logger.info(
+                        "Agent %s: %s not found → trying alternative %s",
+                        self.agent_id, action.tool_name, resolution.alternative_tool,
+                    )
+                    alt_action = AgentAction(
+                        tool_name=resolution.alternative_tool,
+                        tool_input=resolution.alternative_input or action.tool_input,
+                        reasoning=f"Alternative for {action.tool_name}: {action.reasoning}",
+                    )
+                    result = await self._execute_with_permissions(alt_action)
+
+                elif resolution.install_succeeded:
+                    logger.info(
+                        "Agent %s: %s auto-installed — retrying",
+                        self.agent_id, action.tool_name,
+                    )
+                    result = await self._execute_with_permissions(action)
+
+                elif resolution.corrected_flags:
+                    corrected_input = dict(action.tool_input)
+                    corrected_input["flags"] = resolution.corrected_flags
+                    corrected_action = AgentAction(
+                        tool_name=action.tool_name,
+                        tool_input=corrected_input,
+                        reasoning=f"Corrected flags for {action.tool_name}",
+                    )
+                    result = await self._execute_with_permissions(corrected_action)
+
+                else:
+                    logger.warning(
+                        "Agent %s: %s unavailable, no recovery found — skipping",
+                        self.agent_id, action.tool_name,
+                    )
+                    result = ToolResult(success=False, error=f"{action.tool_name} not available — skipped")
 
             # Log tool failures for observability
             if not result.success:
