@@ -96,9 +96,6 @@ class NVDAdapter:
                     break
 
             poc_url = None
-            for ref in cve.get("references", []):
-                poc_url = ref.get("url")
-                break
 
             entries.append(ResearchKBEntry(
                 entry_id=f"nvd-{cve_id}",
@@ -345,7 +342,7 @@ class BlogsAdapter:
             desc_el = desc_el_found if desc_el_found is not None else item.find("summary")
 
             title = title_el.text or "" if title_el is not None else ""
-            link = link_el.text or (link_el.get("href", "") if link_el is not None else "")
+            link = (link_el.text or link_el.get("href", "")) if link_el is not None else ""
             desc = desc_el.text or "" if desc_el is not None else ""
 
             combined = f"{title} {desc}"
