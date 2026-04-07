@@ -46,6 +46,12 @@ class IntelligentReporter:
         self._compliance = compliance_db or ComplianceMappingDB()
         self._pdf_renderer = pdf_renderer  # WeasyPrint wrapper, mocked in tests
         self._confirmed_findings: list[dict[str, Any]] = []
+        # Cache all FINDING_CREATED payloads by finding_id so that when a
+        # FINDING_CLASSIFIED event arrives (which only carries the id +
+        # classification), we can look up and store the *full* finding dict.
+        self._finding_cache: dict[str, dict[str, Any]] = {}
+        # All unverified findings — used as fallback when no verification loop ran.
+        self._all_findings: list[dict[str, Any]] = []
         self._subscribed = False
 
     async def subscribe_to_findings(self) -> None:
@@ -55,20 +61,78 @@ class IntelligentReporter:
             self._subscribed = True
 
     async def _on_finding_event(self, event: dict[str, Any]) -> None:
-        """Handle incoming finding events."""
+        """Handle incoming finding events.
+
+        Tracks ALL findings with their verification status:
+          FINDING_CREATED        → added to _all_findings with status "unverified"
+          FINDING_CLASSIFIED     → status updated in _all_findings cache
+        """
+        event_type = event.get("event_type", "")
         payload = event.get("payload", {})
-        classification = payload.get("classification", "")
-        if classification == "confirmed" or event.get("event_type") == "FINDING_CLASSIFIED":
-            if payload.get("classification") == "confirmed":
-                self._confirmed_findings.append(payload)
+
+        if event_type == "FINDING_CREATED":
+            fid = payload.get("finding_id") or payload.get("id", "")
+            finding = dict(payload)
+            finding.setdefault("verification_status", "unverified")
+            if fid:
+                self._finding_cache[fid] = finding
+            self._all_findings.append(finding)
+
+        elif event_type == "FINDING_CLASSIFIED":
+            classification = payload.get("classification", "")
+            fid = payload.get("finding_id", "")
+            if fid and fid in self._finding_cache:
+                self._finding_cache[fid]["verification_status"] = classification
+                # Also update the entry in _all_findings list (same dict object via cache ref)
+            # Legacy: also maintain confirmed list for backwards compat
+            if classification == "confirmed":
+                if fid and fid in self._finding_cache:
+                    full = dict(self._finding_cache[fid])
+                    full["classification"] = "confirmed"
+                    self._confirmed_findings.append(full)
+                else:
+                    entry = dict(payload)
+                    entry["verification_status"] = "confirmed"
+                    self._confirmed_findings.append(entry)
 
     def add_finding(self, finding: dict[str, Any]) -> None:
         """Manually add a confirmed finding (useful for testing / direct use)."""
-        self._confirmed_findings.append(finding)
+        fid = finding.get("finding_id") or finding.get("id", "")
+        entry = dict(finding)
+        entry.setdefault("verification_status", "confirmed")
+        if fid:
+            self._finding_cache[fid] = entry
+        self._all_findings.append(entry)
+        self._confirmed_findings.append(entry)
 
     @property
     def confirmed_findings(self) -> list[dict[str, Any]]:
         return list(self._confirmed_findings)
+
+    @property
+    def all_findings(self) -> list[dict[str, Any]]:
+        """All findings seen (confirmed + unverified).
+
+        Use this when you want every finding regardless of verification status.
+        """
+        return list(self._all_findings)
+
+    def get_findings_for_report(self) -> list[dict[str, Any]]:
+        """Return ALL findings for report generation, each with verification_status.
+
+        Returns the complete finding set so the report reflects all discovered
+        issues regardless of verification outcome. The verification_status field
+        lets operators filter by CONFIRMED / MANUAL_REVIEW / UNVERIFIED / FALSE_POSITIVE.
+        """
+        findings = []
+        for finding in self._all_findings:
+            f = dict(finding)
+            f.setdefault("verification_status", "unverified")
+            findings.append(f)
+        if not findings and self._confirmed_findings:
+            # Fallback: manually-added findings via add_finding()
+            return list(self._confirmed_findings)
+        return findings
 
     # ------------------------------------------------------------------
     # Report Generation
@@ -94,7 +158,7 @@ class IntelligentReporter:
         Returns:
             Structured report dict with format-specific sections.
         """
-        active_findings = findings if findings is not None else self._confirmed_findings
+        active_findings = findings if findings is not None else self.get_findings_for_report()
         now = datetime.now(timezone.utc).isoformat()
 
         base = {
@@ -196,6 +260,7 @@ class IntelligentReporter:
                 "finding_id": f.get("finding_id", ""),
                 "title": f.get("title", "Unknown"),
                 "severity": f.get("severity", "info"),
+                "verification_status": f.get("verification_status", "unverified"),
                 "description": f.get("description", ""),
                 "target": f.get("target", ""),
                 "port": f.get("port"),
