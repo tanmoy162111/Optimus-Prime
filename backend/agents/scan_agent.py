@@ -69,7 +69,13 @@ class ScanAgent(BaseAgent):
         findings = []
         if not output:
             return findings
-        output_str = str(output)
+        # KaliSSH backend returns a dict with 'stdout' — extract the actual
+        # tool output rather than stringifying the whole dict (which escapes
+        # newlines to \\n and corrupts multi-line regex matching).
+        if isinstance(output, dict):
+            output_str = output.get("stdout", "") or str(output)
+        else:
+            output_str = str(output)
 
         # nmap: open ports
         if tool_name == "nmap" and "open" in output_str.lower():

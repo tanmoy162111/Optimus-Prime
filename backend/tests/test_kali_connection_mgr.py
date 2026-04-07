@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.tools.backends.kali_ssh import (
+    MAX_RECONNECT_ATTEMPTS,
     RECONNECT_BASE_DELAY,
     RECONNECT_MAX_DELAY,
     KaliConnection,
@@ -103,6 +104,29 @@ class TestKaliConnection:
         conn = KaliConnection("kali", 22, "root", "pass")
         with pytest.raises(ConnectionError, match="Not connected"):
             conn.exec_command("nmap target")
+
+    def test_exec_command_timeout_when_kali_offline(self):
+        """exec_command raises TimeoutError when channel never closes (Kali offline)."""
+        import threading
+
+        conn = KaliConnection("kali", 22, "root", "pass")
+
+        # Build a channel whose status_event never fires (simulates Kali dropping offline)
+        channel_mock = MagicMock()
+        channel_mock.status_event = threading.Event()  # never set → wait() returns False
+        channel_mock.status_event.wait = MagicMock(return_value=False)
+
+        stdout_mock = MagicMock()
+        stdout_mock.channel = channel_mock
+        stderr_mock = MagicMock()
+
+        client = MagicMock()
+        client.exec_command.return_value = (MagicMock(), stdout_mock, stderr_mock)
+        conn._client = client
+        conn._connected = True
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            conn.exec_command("nmap target", timeout=1)
 
     def test_close(self):
         conn = KaliConnection("kali", 22, "root", "pass")
@@ -209,7 +233,7 @@ class TestKaliConnectionManager:
         spec = MagicMock()
         spec.timeout_seconds = 60
 
-        with pytest.raises(ConnectionError, match="KALI_UNREACHABLE"):
+        with pytest.raises(ConnectionError, match="unreachable"):
             await mgr.execute("nmap", {"target": "10.0.0.1"}, spec)
 
         # Check event was published
@@ -320,21 +344,21 @@ class TestExponentialBackoff:
     """Verify the reconnect backoff timing constants."""
 
     def test_base_delay(self):
-        assert RECONNECT_BASE_DELAY == 2.0
+        assert RECONNECT_BASE_DELAY == 1.0
 
     def test_max_delay(self):
-        assert RECONNECT_MAX_DELAY == 30.0
+        assert RECONNECT_MAX_DELAY == 5.0
 
     def test_backoff_sequence(self):
         """Verify the exponential backoff sequence caps at max."""
         delay = RECONNECT_BASE_DELAY
         delays = []
-        for _ in range(5):
+        for _ in range(MAX_RECONNECT_ATTEMPTS):
             actual = min(delay, RECONNECT_MAX_DELAY)
             delays.append(actual)
             delay *= 2
 
-        assert delays == [2.0, 4.0, 8.0, 16.0, 30.0]
+        assert delays == [1.0, 2.0, 4.0, 5.0, 5.0][:MAX_RECONNECT_ATTEMPTS]
 
 
 class TestKaliConnectionManagerBroadcast:

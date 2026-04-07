@@ -56,16 +56,30 @@ class ScopeEnforcer:
         # Extract hostname/IP from URL if needed
         clean_target = ScopeEnforcer._extract_host(target)
 
-        # Check excluded first
+        # Check excluded first — normalize URL exclusion entries to bare host/IP so
+        # that entries like 'https://admin.example.com' still match 'admin.example.com'.
         for excluded in scope.excluded_targets:
-            if ScopeEnforcer._target_matches(clean_target, excluded):
+            clean_excluded = (
+                ScopeEnforcer._extract_host(excluded)
+                if "://" in excluded
+                else excluded.strip().lower()
+            )
+            if ScopeEnforcer._target_matches(clean_target, clean_excluded):
                 raise ScopeViolationError(
                     f"Target '{clean_target}' is in exclusion list"
                 )
 
-        # Check if target matches any scope entry
+        # Check if target matches any scope entry.
+        # Only normalize entries that are full URLs (contain ://) so that IP
+        # ranges in CIDR notation (e.g. 10.0.0.0/24) are not corrupted by the
+        # path-stripping in _extract_host.
         for allowed in scope.targets:
-            if ScopeEnforcer._target_matches(clean_target, allowed):
+            clean_allowed = (
+                ScopeEnforcer._extract_host(allowed)
+                if "://" in allowed
+                else allowed.strip().lower()
+            )
+            if ScopeEnforcer._target_matches(clean_target, clean_allowed):
                 return
 
         # No match found

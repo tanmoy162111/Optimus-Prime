@@ -221,8 +221,9 @@ class OmO:
                     error=str(exc),
                 ))
 
-        # Phase is completed if at least one agent succeeded
-        has_success = any(ar.status == "completed" for ar in agent_results)
+        # Phase is completed if at least one agent succeeded or exhausted its budget
+        PARTIAL_SUCCESS_STATUSES = {"completed", "max_iterations_reached"}
+        has_success = any(ar.status in PARTIAL_SUCCESS_STATUSES for ar in agent_results)
         status = "completed" if has_success else "failed"
 
         # Phase with no agents (e.g., report) is auto-completed
@@ -245,6 +246,17 @@ class OmO:
         plan_id: str,
     ) -> AgentResult:
         """Dispatch a single agent via the engine router or agent factory."""
+        # Guard: require at least one target before dispatching
+        if not scope.targets:
+            logger.warning(
+                "OmO: no targets in scope for phase %s — aborting agent dispatch",
+                phase_name,
+            )
+            return AgentResult(
+                status="failed",
+                error="No targets configured. Set scope via the Scope panel before running a directive.",
+            )
+
         task_id = str(uuid.uuid4())
 
         # Build a prompt that includes actual targets so agents can extract them
@@ -310,7 +322,10 @@ class OmO:
             results = await self._engine_router.route(engine_task)
             if results and results[0].agent_results:
                 return results[0].agent_results[0]
-            return AgentResult(status="completed", output="Engine dispatch completed")
+            # No agent_results means the engine returned an error — propagate it
+            error_msg = results[0].error if results else "Engine returned no results"
+            logger.error("OmO: engine dispatch returned no agent results for %s: %s", phase_name, error_msg)
+            return AgentResult(status="failed", error=error_msg or "Engine dispatch produced no agent results")
 
         return AgentResult(status="completed", output="No dispatcher configured — stub")
 

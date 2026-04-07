@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from backend.core.models import AgentType, FindingClassification
+from backend.core.models import AgentType, FindingClassification, ScopeConfig, StealthLevel
 from backend.core.xai_logger import XAILogger
 from backend.verification.verification_policy import (
     DEFAULT_VERIFICATION_POLICY,
@@ -42,11 +42,13 @@ class VerificationLoop:
         tool_executor: Any = None,
         event_bus: Any = None,
         xai_logger: XAILogger | None = None,
+        scope: ScopeConfig | None = None,
     ) -> None:
         self._policy = policy or DEFAULT_VERIFICATION_POLICY
         self._tool_executor = tool_executor
         self._event_bus = event_bus
         self._xai_logger = xai_logger or XAILogger()
+        self._scope = scope  # engagement scope — verification tools probe in-scope targets
         self._request_counts: dict[str, int] = {}
 
     @property
@@ -173,8 +175,8 @@ class VerificationLoop:
             result = await self._tool_executor.execute(
                 tool_name=tool_name,
                 tool_input=tool_input,
-                scope=None,  # VerificationLoop scope is set by OmO
-                stealth_level=None,
+                scope=self._scope or ScopeConfig(),  # use engagement scope so targets pass scope check
+                stealth_level=StealthLevel.MEDIUM,  # safe default; verification tools are passive
                 allowed_tools=self._policy.allowed_tools,
                 agent_id="verification-loop",
                 agent_type=AgentType.VERIFICATION_LOOP,

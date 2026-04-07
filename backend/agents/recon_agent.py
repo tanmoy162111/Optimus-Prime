@@ -51,8 +51,14 @@ When you have gathered sufficient reconnaissance data, respond with:
     "is_terminal": true
 }
 
-Always start with broad reconnaissance (dns/subdomain) then narrow to specific services.
-Never repeat the same exact scan. Progress through the recon methodology."""
+REQUIRED METHODOLOGY — always follow this order:
+1. dnsrecon — DNS enumeration to discover records and subdomains
+2. sublist3r or amass — subdomain enumeration
+3. nmap — MUST always run nmap with flags "-Pn -sV --top-ports 1000" to detect open ports
+   (use -Pn to skip host discovery — required for internet/cloud targets that block ICMP)
+4. whatweb — web technology fingerprinting on discovered HTTP/HTTPS services
+5. Terminate only after completing at least steps 1 and 3.
+Never terminate without running nmap. Never repeat the same exact scan."""
 
 
 @dataclass
@@ -73,7 +79,7 @@ class ReconAgent(BaseAgent):
     # Runtime
     llm_router: LLMRouter | None = None
     _action_history: list[dict[str, Any]] = field(default_factory=list)
-    _findings: list[Finding] = field(default_factory=list)
+    _findings: list[dict] = field(default_factory=list)
 
     async def execute(self, task: AgentTask) -> AgentResult:
         """Execute reconnaissance via the agentic run_loop."""
@@ -163,8 +169,8 @@ class ReconAgent(BaseAgent):
             ),
             AgentAction(
                 tool_name="nmap",
-                tool_input={"target": target, "flags": "-sV --top-ports 1000"},
-                reasoning="Step 3: Service version detection on top 1000 ports",
+                tool_input={"target": target, "flags": "-Pn -sV --top-ports 1000"},
+                reasoning="Step 3: Service version detection on top 1000 ports (-Pn skips host discovery for internet/cloud targets that block ICMP)",
             ),
             AgentAction(
                 tool_name="whatweb",
@@ -215,17 +221,36 @@ class ReconAgent(BaseAgent):
             lines.append(f"{i}. {action['tool']}({action['input']}) — {action['reasoning']}")
         return "\n".join(lines)
 
-    def parse_findings_from_output(self, tool_name: str, output: Any) -> list[Finding]:
-        """Parse tool output into structured findings.
+    def parse_findings_from_output(self, tool_name: str, output: Any) -> list[dict]:
+        """Parse tool output into structured findings (always returns plain dicts).
 
         This is a simplified parser — full parsers for each tool
         will be implemented with dedicated output processors in M2.
         """
-        findings = []
+        import dataclasses
+        from datetime import datetime
+
+        def _serialize(obj: Any) -> Any:
+            """Recursively make a dataclasses.asdict result JSON-safe."""
+            if isinstance(obj, dict):
+                return {k: _serialize(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_serialize(v) for v in obj]
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            return obj
+
+        findings: list[dict] = []
         if not output:
             return findings
 
-        output_str = str(output)
+        # KaliSSH backend returns a dict with 'stdout' — extract the actual
+        # tool output rather than stringifying the whole dict (which escapes
+        # newlines to \\n and pollutes service names captured by regex).
+        if isinstance(output, dict):
+            output_str = output.get("stdout", "") or str(output)
+        else:
+            output_str = str(output)
 
         # Simple heuristic: look for open ports in nmap output
         if tool_name == "nmap" and "open" in output_str.lower():
@@ -241,6 +266,8 @@ class ReconAgent(BaseAgent):
                     port=int(port),
                     classification=FindingClassification.UNVERIFIED,
                 )
-                findings.append(finding)
+                # Convert dataclass -> dict and make all values JSON-safe
+                findings.append(_serialize(dataclasses.asdict(finding)))
 
         return findings
+

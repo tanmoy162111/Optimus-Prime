@@ -22,10 +22,14 @@ logger = logging.getLogger(__name__)
 
 # Pool configuration
 POOL_SIZE = 3
-MAX_RECONNECT_ATTEMPTS = 5
-RECONNECT_BASE_DELAY = 2.0
-RECONNECT_MAX_DELAY = 30.0
-COMMAND_TIMEOUT = 300  # default per-command timeout
+MAX_RECONNECT_ATTEMPTS = 2       # Reduced from 5 — fail fast, let circuit breaker handle retries
+RECONNECT_BASE_DELAY = 1.0       # Reduced from 2s
+RECONNECT_MAX_DELAY = 5.0        # Reduced from 30s
+COMMAND_TIMEOUT = 300            # default per-command timeout
+SSH_CONNECT_TIMEOUT = 5          # per-attempt SSH connect timeout (was 10s)
+CIRCUIT_BREAKER_COOLDOWN = 60.0  # seconds before retrying after total pool failure
+HEALTH_CHECK_TIMEOUT = 2.0       # max seconds for a health check — bounds lock hold time
+SSH_KEEPALIVE_INTERVAL = 30      # seconds between SSH-level keepalives
 
 
 class KaliConnection:
@@ -52,11 +56,16 @@ class KaliConnection:
             port=self._port,
             username=self._username,
             password=self._password,
-            timeout=10,
+            timeout=SSH_CONNECT_TIMEOUT,
             allow_agent=False,
             look_for_keys=False,
         )
         self._client = client
+        # Enable SSH-level keepalives so dead connections are detected quickly
+        # instead of appearing healthy until the next command blocks.
+        transport = client.get_transport()
+        if transport:
+            transport.set_keepalive(SSH_KEEPALIVE_INTERVAL)
         self._connected = True
         logger.info("KaliConnection: connected to %s:%d", self._host, self._port)
 
@@ -80,6 +89,16 @@ class KaliConnection:
             raise ConnectionError("Not connected to Kali")
 
         stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+
+        # Wait for the channel to close with a timeout.  Without this,
+        # recv_exit_status() blocks indefinitely if Kali goes offline
+        # mid-command, causing the ToolExecutor's 300 s asyncio.wait_for
+        # to fire and report a spurious timeout instead of a clean error.
+        if not stdout.channel.status_event.wait(timeout=timeout):
+            stdout.channel.close()
+            self._connected = False
+            raise TimeoutError(f"Command timed out after {timeout}s: {command[:100]}")
+
         exit_code = stdout.channel.recv_exit_status()
         out = stdout.read().decode("utf-8", errors="replace")
         err = stderr.read().decode("utf-8", errors="replace")
@@ -126,6 +145,7 @@ class KaliConnectionManager:
         self._event_bus = event_bus
         self._terminal_broadcaster = terminal_broadcaster
         self._pool_lock = asyncio.Lock()
+        self._unreachable_until: float = 0.0  # circuit breaker timestamp
 
     async def connect(self) -> None:
         """Establish the connection pool."""
@@ -150,11 +170,29 @@ class KaliConnectionManager:
 
     async def _get_healthy_connection(self) -> KaliConnection:
         """Get a healthy connection — lock only held for pool reads, not reconnect sleep."""
-        # Step 1: find a healthy slot under the lock (fast operation)
+        # Circuit breaker: fail immediately if Kali was recently unreachable
+        now = time.monotonic()
+        if now < self._unreachable_until:
+            remaining = self._unreachable_until - now
+            raise ConnectionError(
+                f"Kali SSH unreachable — retrying in {remaining:.0f}s "
+                f"(start the Kali container to enable scan tools)"
+            )
+
+        # Step 1: find a healthy slot under the lock (fast operation).
+        # Each health check is bounded by HEALTH_CHECK_TIMEOUT so the lock
+        # is never held longer than pool_size × HEALTH_CHECK_TIMEOUT even
+        # if send_ignore() stalls on a half-open TCP connection.
         conn_to_reconnect = None
         async with self._pool_lock:
             for conn in self._pool:
-                healthy = await asyncio.to_thread(conn.health_check)
+                try:
+                    healthy = await asyncio.wait_for(
+                        asyncio.to_thread(conn.health_check),
+                        timeout=HEALTH_CHECK_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    healthy = False
                 if healthy:
                     return conn
             # No healthy connections found — pick first slot to reconnect
@@ -175,10 +213,12 @@ class KaliConnectionManager:
             if success:
                 return conn
 
-        # Total failure
+        # Total failure — open circuit breaker
+        self._unreachable_until = time.monotonic() + CIRCUIT_BREAKER_COOLDOWN
         await self._publish_unreachable()
         raise ConnectionError(
-            f"KaliConnectionManager: all {self._pool_size} connections failed — KALI_UNREACHABLE"
+            f"Kali SSH unreachable — all {self._pool_size} connections failed. "
+            f"Will retry in {CIRCUIT_BREAKER_COOLDOWN:.0f}s."
         )
 
     async def _reconnect_connection(self, conn: KaliConnection) -> bool:

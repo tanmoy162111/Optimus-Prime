@@ -86,9 +86,9 @@ class BaseAgent(ABC):
 
     # --- Identity ---
     agent_id: str
-    agent_type: AgentType
-    engine: EngineType
-    allowed_tools: frozenset[str]
+    agent_type: AgentType = AgentType.RECON
+    engine: EngineType = EngineType.INFRASTRUCTURE
+    allowed_tools: frozenset[str] = field(default_factory=frozenset)
 
     # --- Agentic execution patterns ---
     max_iterations: int = 50
@@ -106,6 +106,7 @@ class BaseAgent(ABC):
     tool_executor: Any = None  # ToolExecutor — injected at runtime
     xai_logger: XAILogger = field(default_factory=XAILogger)
     kali_mgr: Any = None  # KaliConnectionManager — injected at runtime (v2.0)
+    llm_router: Any = None  # LLMRouter — injected at runtime
 
     @abstractmethod
     async def execute(self, task: AgentTask) -> AgentResult:
@@ -134,6 +135,8 @@ class BaseAgent(ABC):
           7. Check if terminal → return result
         """
         iterations = 0
+        final_result: AgentResult | None = None
+        _all_findings: list = []  # accumulate findings across all iterations
 
         while iterations < self.max_iterations:
             iterations += 1
@@ -168,6 +171,7 @@ class BaseAgent(ABC):
                 if parsed:
                     result.findings.extend(parsed)
                     result.is_finding = True
+                    _all_findings.extend(parsed)  # accumulate across iterations
                     logger.info(
                         "Agent %s: parsed %d findings from %s",
                         self.agent_id, len(parsed), action.tool_name,
@@ -184,21 +188,57 @@ class BaseAgent(ABC):
 
             # Publish to EventBus
             if self.event_bus:
-                channel = "findings" if result.is_finding else "lifecycle"
-                await self.event_bus.publish(
-                    channel=channel,
-                    event_type=(
-                        "FINDING_CREATED" if result.is_finding
-                        else "AGENT_RUNNING"
-                    ),
-                    payload=result.to_event(),
-                )
+                if result.is_finding and result.findings:
+                    # Publish one FINDING_CREATED event per finding with full data
+                    for finding in result.findings:
+                        # Normalise: Finding dataclasses were converted to dicts in
+                        # parse_findings_from_output, but guard here just in case.
+                        finding_payload = (
+                            finding
+                            if isinstance(finding, dict)
+                            else finding.__dict__
+                        )
+                        await self.event_bus.publish(
+                            channel="findings",
+                            event_type="FINDING_CREATED",
+                            payload=finding_payload,
+                        )
+                else:
+                    event_payload = result.to_event()
+                    event_payload["task_id"] = task.task_id
+                    await self.event_bus.publish(
+                        channel="lifecycle",
+                        event_type="AGENT_RUNNING",
+                        payload=event_payload,
+                    )
 
             # Check terminal
             if result.is_terminal:
-                return result.to_agent_result()
+                final_result = result.to_agent_result()
+                final_result.findings = list(_all_findings)  # include all accumulated findings
+                break
 
-        return AgentResult(status="max_iterations_reached")
+        if final_result is None:
+            final_result = AgentResult(
+                status="max_iterations_reached",
+                findings=list(_all_findings),  # carry forward all accumulated findings
+            )
+
+        # Publish agent lifecycle completion event
+        if self.event_bus:
+            await self.event_bus.publish(
+                channel="lifecycle",
+                event_type="AGENT_FINISHED" if final_result.status in ("completed", "max_iterations_reached") else "AGENT_FAILED",
+                payload={
+                    "task_id": task.task_id,
+                    "agent_type": self.agent_type.value,
+                    "status": final_result.status,
+                    "findings_count": len(final_result.findings),
+                    "error": final_result.error,
+                },
+            )
+
+        return final_result
 
     async def _execute_with_permissions(self, action: AgentAction) -> ToolResult:
         """Execute a tool call through the full permission pipeline.
