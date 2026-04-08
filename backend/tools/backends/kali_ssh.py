@@ -261,6 +261,17 @@ class KaliConnectionManager:
             command = self._build_command(tool_name, tool_input)
             timeout = getattr(tool_spec, "timeout_seconds", COMMAND_TIMEOUT)
 
+            # Prepend a full PATH so tools installed via apt, pip3 --user, Go, or
+            # manually into /opt / /snap are reachable.  paramiko's exec_command
+            # launches a non-login, non-interactive shell — it does NOT source
+            # ~/.bashrc or ~/.profile — so the default PATH is bare system paths
+            # only.  This one-liner closes that gap without any exec overhead.
+            command = (
+                "export PATH=/root/.local/bin:/usr/local/go/bin:/snap/bin:"
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:"
+                "$PATH 2>/dev/null; " + command
+            )
+
             try:
                 stdout, stderr, exit_code = await asyncio.to_thread(
                     conn.exec_command, command, timeout,
@@ -414,6 +425,7 @@ class KaliConnectionManager:
                 "echo 'msfconsole: no command provided'"
             ).strip(),
             # --- TLS / HTTP probes ---
+            # Kali installs the package as 'testssl' (no .sh suffix)
             "testssl": lambda: f"timeout 60 testssl {flags} {target}".strip(),
             "testssl_readonly": lambda: f"timeout 60 testssl --read-only {target}".strip(),
             "curl": lambda: f"timeout 15 curl -sk {flags} '{target}' 2>/dev/null".strip(),

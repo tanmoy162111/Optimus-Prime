@@ -132,8 +132,19 @@ class ReconAgent(BaseAgent):
         if "target" not in tool_input:
             tool_input["target"] = target
 
+        suggested_tool = data["tool"]
+
+        # Dedup guard: if LLM suggests a tool already in history, use fallback
+        used_tools = {a["tool"] for a in self._action_history}
+        if suggested_tool in used_tools:
+            logger.warning(
+                "ReconAgent: LLM suggested already-used tool '%s' — using fallback planner",
+                suggested_tool,
+            )
+            return self._plan_fallback(task, target)
+
         action = AgentAction(
-            tool_name=data["tool"],
+            tool_name=suggested_tool,
             tool_input=tool_input,
             reasoning=data.get("reasoning", "LLM-planned action"),
         )

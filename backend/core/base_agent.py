@@ -107,7 +107,6 @@ class BaseAgent(ABC):
     xai_logger: XAILogger = field(default_factory=XAILogger)
     kali_mgr: Any = None  # KaliConnectionManager — injected at runtime (v2.0)
     llm_router: Any = None  # LLMRouter — injected at runtime
-    _tool_fallback_resolver: Any = field(default=None, repr=False)
 
     @abstractmethod
     async def execute(self, task: AgentTask) -> AgentResult:
@@ -136,8 +135,6 @@ class BaseAgent(ABC):
           7. Check if terminal → return result
         """
         iterations = 0
-        final_result: AgentResult | None = None
-        _all_findings: list = []  # accumulate findings across all iterations
 
         while iterations < self.max_iterations:
             iterations += 1
@@ -159,55 +156,6 @@ class BaseAgent(ABC):
             # Execute with full permission pipeline
             result = await self._execute_with_permissions(action)
 
-            # Intercept tool_not_found — attempt fallback resolution before skipping
-            if (
-                result.success
-                and isinstance(result.output, dict)
-                and result.output.get("status") == "tool_not_found"
-                and self._tool_fallback_resolver is not None
-            ):
-                resolution = await self._tool_fallback_resolver.resolve(
-                    tool_name=action.tool_name,
-                    tool_input=action.tool_input,
-                    error=result.output.get("error", ""),
-                )
-
-                if resolution.alternative_tool:
-                    logger.info(
-                        "Agent %s: %s not found → trying alternative %s",
-                        self.agent_id, action.tool_name, resolution.alternative_tool,
-                    )
-                    alt_action = AgentAction(
-                        tool_name=resolution.alternative_tool,
-                        tool_input=resolution.alternative_input or action.tool_input,
-                        reasoning=f"Alternative for {action.tool_name}: {action.reasoning}",
-                    )
-                    result = await self._execute_with_permissions(alt_action)
-
-                elif resolution.install_succeeded:
-                    logger.info(
-                        "Agent %s: %s auto-installed — retrying",
-                        self.agent_id, action.tool_name,
-                    )
-                    result = await self._execute_with_permissions(action)
-
-                elif resolution.corrected_flags:
-                    corrected_input = dict(action.tool_input)
-                    corrected_input["flags"] = resolution.corrected_flags
-                    corrected_action = AgentAction(
-                        tool_name=action.tool_name,
-                        tool_input=corrected_input,
-                        reasoning=f"Corrected flags for {action.tool_name}",
-                    )
-                    result = await self._execute_with_permissions(corrected_action)
-
-                else:
-                    logger.warning(
-                        "Agent %s: %s unavailable, no recovery found — skipping",
-                        self.agent_id, action.tool_name,
-                    )
-                    result = ToolResult(success=False, error=f"{action.tool_name} not available — skipped")
-
             # Log tool failures for observability
             if not result.success:
                 logger.warning(
@@ -221,7 +169,6 @@ class BaseAgent(ABC):
                 if parsed:
                     result.findings.extend(parsed)
                     result.is_finding = True
-                    _all_findings.extend(parsed)  # accumulate across iterations
                     logger.info(
                         "Agent %s: parsed %d findings from %s",
                         self.agent_id, len(parsed), action.tool_name,
@@ -238,57 +185,21 @@ class BaseAgent(ABC):
 
             # Publish to EventBus
             if self.event_bus:
-                if result.is_finding and result.findings:
-                    # Publish one FINDING_CREATED event per finding with full data
-                    for finding in result.findings:
-                        # Normalise: Finding dataclasses were converted to dicts in
-                        # parse_findings_from_output, but guard here just in case.
-                        finding_payload = (
-                            finding
-                            if isinstance(finding, dict)
-                            else finding.__dict__
-                        )
-                        await self.event_bus.publish(
-                            channel="findings",
-                            event_type="FINDING_CREATED",
-                            payload=finding_payload,
-                        )
-                else:
-                    event_payload = result.to_event()
-                    event_payload["task_id"] = task.task_id
-                    await self.event_bus.publish(
-                        channel="lifecycle",
-                        event_type="AGENT_RUNNING",
-                        payload=event_payload,
-                    )
+                channel = "findings" if result.is_finding else "lifecycle"
+                await self.event_bus.publish(
+                    channel=channel,
+                    event_type=(
+                        "FINDING_CREATED" if result.is_finding
+                        else "AGENT_RUNNING"
+                    ),
+                    payload=result.to_event(),
+                )
 
             # Check terminal
             if result.is_terminal:
-                final_result = result.to_agent_result()
-                final_result.findings = list(_all_findings)  # include all accumulated findings
-                break
+                return result.to_agent_result()
 
-        if final_result is None:
-            final_result = AgentResult(
-                status="max_iterations_reached",
-                findings=list(_all_findings),  # carry forward all accumulated findings
-            )
-
-        # Publish agent lifecycle completion event
-        if self.event_bus:
-            await self.event_bus.publish(
-                channel="lifecycle",
-                event_type="AGENT_FINISHED" if final_result.status in ("completed", "max_iterations_reached") else "AGENT_FAILED",
-                payload={
-                    "task_id": task.task_id,
-                    "agent_type": self.agent_type.value,
-                    "status": final_result.status,
-                    "findings_count": len(final_result.findings),
-                    "error": final_result.error,
-                },
-            )
-
-        return final_result
+        return AgentResult(status="max_iterations_reached")
 
     async def _execute_with_permissions(self, action: AgentAction) -> ToolResult:
         """Execute a tool call through the full permission pipeline.

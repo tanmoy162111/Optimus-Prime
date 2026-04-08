@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Projects/Optimus/**)",
+      "Bash(.venv\\\\Scripts\\\\pytest backend/tests/test_verification_loop_classify.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_verification_loop_classify.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_verification_policy.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_reporter_verification_status.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_reporter_verification_status.py backend/tests/test_report_formats.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_scope_discovery_target_type.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_omx_two_phase_exploit.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_pentest_e2e.py -v -k \"not exploit\")",
+      "Bash(.venv/Scripts/pytest backend/tests/test_pentest_e2e.py backend/tests/test_omx_two_phase_exploit.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_exploit_agent_fallback.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_tool_fallback_resolver.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_base_agent_resilience.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_base_agent_resilience.py backend/tests/test_recon_agent_loop.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_kali_ssh_timeouts.py backend/tests/test_kali_connection_mgr.py -v)",
+      "Bash(.venv/Scripts/pytest backend/tests/test_llm_json_hardening.py -v)",
+      "Bash(pip show:*)",
+      "Bash(pip list:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Skill(gsd:debug)",
+      "Bash(docker compose:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3:*)",
+      "Bash(kill %1)",
+      "Bash(wait %1)",
+      "Bash(docker exec:*)",
+      "Bash(wait)"
+    ]
+  }
+}

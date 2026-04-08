@@ -62,10 +62,21 @@ class TerminalLogHandler(logging.Handler):
     def __init__(self, broadcaster: TerminalBroadcaster) -> None:
         super().__init__()
         self._broadcaster = broadcaster
+        # Capture the running event loop at construction time (inside lifespan).
+        # Worker threads spawned via asyncio.to_thread() have no running loop of
+        # their own, so we must schedule back onto this main loop.
+        try:
+            self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
 
     def emit(self, record: logging.LogRecord) -> None:
         """Publish the log record as a backend_log event. Never raises."""
         try:
+            loop = self._loop
+            if loop is None or not loop.is_running():
+                return  # No live event loop — silently discard
+
             event = {
                 "type": "backend_log",
                 "source": "backend",
@@ -75,9 +86,11 @@ class TerminalLogHandler(logging.Handler):
                 "ts": _now_iso(),
             }
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
+                # Already on the event-loop thread — create task directly
                 loop.create_task(self._broadcaster.publish(event))
             except RuntimeError:
-                self.handleError(record)
+                # Called from a worker thread — schedule safely onto the main loop
+                asyncio.run_coroutine_threadsafe(self._broadcaster.publish(event), loop)
         except Exception:
             self.handleError(record)

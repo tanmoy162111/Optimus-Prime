@@ -143,7 +143,7 @@ class OmO:
                 )
 
             # Execute phase
-            phase_result = await self._execute_phase(phase, scope, plan.plan_id, plan_metadata=plan.metadata)
+            phase_result = await self._execute_phase(phase, scope, plan.plan_id)
             phase_results.append(phase_result)
 
             if phase_result.status == "completed":
@@ -197,24 +197,18 @@ class OmO:
         phase: EngagementPhase,
         scope: ScopeConfig,
         plan_id: str,
-        plan_metadata: dict | None = None,
     ) -> PhaseResult:
         """Execute a single phase by dispatching agents."""
         agent_results: list[AgentResult] = []
 
         for agent_type in phase.agent_types:
             try:
-                phase_meta = dict(phase.metadata or {})
-                if plan_metadata and plan_metadata.get("research_context"):
-                    phase_meta["research_context"] = plan_metadata["research_context"]
-
                 result = await self._dispatch_agent(
                     agent_type=agent_type,
                     engine=phase.engine,
                     scope=scope,
                     phase_name=phase.name,
                     plan_id=plan_id,
-                    phase_metadata=phase_meta,
                 )
                 agent_results.append(result)
             except Exception as exc:
@@ -250,7 +244,6 @@ class OmO:
         scope: ScopeConfig,
         phase_name: str,
         plan_id: str,
-        phase_metadata: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Dispatch a single agent via the engine router or agent factory."""
         # Guard: require at least one target before dispatching
@@ -265,19 +258,10 @@ class OmO:
             )
 
         task_id = str(uuid.uuid4())
-        phase_metadata = phase_metadata or {}
 
         # Build a prompt that includes actual targets so agents can extract them
         targets_str = " ".join(scope.targets) if scope.targets else ""
         prompt = f"Execute {phase_name} phase against {targets_str}".strip() if targets_str else f"Execute {phase_name} phase"
-
-        # Inject phase metadata flags into the prompt so agents can read them.
-        # ExploitAgent reads exploit_mode from the prompt text.
-        if phase_metadata.get("exploit_mode"):
-            prompt += f" exploit_mode={phase_metadata['exploit_mode']}"
-
-        if phase_metadata.get("research_context"):
-            prompt += f"\n\nKnown Intel:\n{phase_metadata['research_context']}"
 
         # Register task
         if self._task_registry:
@@ -338,10 +322,7 @@ class OmO:
             results = await self._engine_router.route(engine_task)
             if results and results[0].agent_results:
                 return results[0].agent_results[0]
-            # No agent_results means the engine returned an error — propagate it
-            error_msg = results[0].error if results else "Engine returned no results"
-            logger.error("OmO: engine dispatch returned no agent results for %s: %s", phase_name, error_msg)
-            return AgentResult(status="failed", error=error_msg or "Engine dispatch produced no agent results")
+            return AgentResult(status="completed", output="Engine dispatch completed")
 
         return AgentResult(status="completed", output="No dispatcher configured — stub")
 

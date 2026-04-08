@@ -19,91 +19,10 @@ from backend.core.models import (
     EngineTask,
     EngineType,
     ScopeConfig,
-    StealthLevel,
 )
 from backend.engines.engine_interface import EngineInterface
 
 logger = logging.getLogger(__name__)
-
-
-class _VerificationLoopAdapter:
-    """Thin BaseAgent-compatible wrapper around VerificationLoop.
-
-    EngineInfra requires agent classes with an async execute(task) -> AgentResult
-    interface.  VerificationLoop does not inherit from BaseAgent, so this
-    adapter bridges the gap without modifying VerificationLoop itself.
-    """
-
-    def __init__(
-        self,
-        agent_id: str,
-        agent_type: AgentType,
-        engine: EngineType,
-        scope: ScopeConfig,
-        tool_executor: Any = None,
-        event_bus: Any = None,
-        kali_mgr: Any = None,
-        llm_router: Any = None,
-    ) -> None:
-        from backend.verification.verification_loop import VerificationLoop
-        self._loop = VerificationLoop(
-            tool_executor=tool_executor,
-            event_bus=event_bus,
-            scope=scope,
-        )
-        self._scope = scope
-        self.xai_logger = None  # may be injected by EngineInfra
-
-    async def execute(self, task: Any) -> AgentResult:
-        """Execute verification against findings from the task prompt or EventBus.
-
-        The task prompt may be a JSON-encoded list of finding dicts, or plain
-        text (e.g. "Execute Verification phase against 10.0.0.1").  When the
-        prompt is not parseable as a finding list, fall back to reading all
-        FINDING_CREATED events from the EventBus so the verification phase
-        always has access to findings produced by earlier phases.
-        """
-        import json
-
-        # Forward injected xai_logger to inner VerificationLoop before executing
-        if self.xai_logger:
-            self._loop._xai_logger = self.xai_logger
-
-        findings: list[dict] = []
-        try:
-            parsed = json.loads(task.prompt)
-            if isinstance(parsed, list):
-                findings = parsed
-        except (json.JSONDecodeError, AttributeError):
-            findings = []
-
-        # Fallback: load findings from EventBus when prompt is plain text
-        if not findings and self._loop._event_bus:
-            try:
-                events = await self._loop._event_bus.replay(0)
-                findings = [
-                    e["payload"]
-                    for e in events
-                    if e.get("event_type") == "FINDING_CREATED"
-                    and isinstance(e.get("payload"), dict)
-                ]
-            except Exception:
-                findings = []
-
-        if not findings:
-            return AgentResult(
-                status="completed",
-                output="VerificationLoop: no findings to verify",
-            )
-
-        classifications = await self._loop.verify_findings_batch(findings)
-        confirmed = [fid for fid, cls in classifications.items() if cls.value == "confirmed"]
-        return AgentResult(
-            status="completed",
-            output=f"VerificationLoop: verified {len(findings)} finding(s); {len(confirmed)} confirmed",
-            findings=findings,
-            metadata={"classifications": {k: v.value for k, v in classifications.items()}},
-        )
 
 # Agent type -> module path, class name
 AGENT_REGISTRY: dict[str, tuple[str, str]] = {
@@ -116,13 +35,7 @@ AGENT_REGISTRY: dict[str, tuple[str, str]] = {
     "datasec": ("backend.agents.datasec_agent", "DataSecAgent"),
     "endpoint": ("backend.agents.endpoint_agent", "EndpointAgent"),
     "scope_discovery": ("backend.agents.scope_discovery_agent", "ScopeDiscoveryAgent"),
-    # VerificationLoop is registered via its BaseAgent-compatible adapter
-    # so that EngineInfra can dispatch verify phases without special-casing.
-    "verification_loop": (None, None),  # sentinel — handled directly below
 }
-
-# Sentinel value used for the verification_loop entry
-_VERIFICATION_LOOP_ADAPTER = _VerificationLoopAdapter
 
 
 class EngineInfra(EngineInterface):
@@ -142,14 +55,12 @@ class EngineInfra(EngineInterface):
         xai_logger: Any = None,
         kali_mgr: Any = None,
         llm_router: Any = None,
-        strategy_engine: Any = None,
     ) -> None:
         self._tool_executor = tool_executor
         self._event_bus = event_bus
         self._xai_logger = xai_logger
         self._kali_mgr = kali_mgr
         self._llm_router = llm_router
-        self._strategy_engine = strategy_engine
 
     async def dispatch(self, task: EngineTask) -> EngineResult:
         """Dispatch a task to the appropriate agent within this engine."""
@@ -166,21 +77,17 @@ class EngineInfra(EngineInterface):
             )
 
         try:
+            # Dynamic import
+            module_path, class_name = agent_entry
             import importlib
+            module = importlib.import_module(module_path)
+            agent_cls = getattr(module, class_name)
 
             # Resolve AgentType from the agent class name string
             try:
                 _agent_type = AgentType(agent_class_name)
             except ValueError:
                 _agent_type = AgentType.RECON  # safe fallback
-
-            # Resolve agent class — VerificationLoop uses the local adapter
-            module_path, class_name = agent_entry
-            if module_path is None:
-                agent_cls = _VERIFICATION_LOOP_ADAPTER
-            else:
-                module = importlib.import_module(module_path)
-                agent_cls = getattr(module, class_name)
 
             # Create agent with dependency injection
             agent = agent_cls(
@@ -197,10 +104,6 @@ class EngineInfra(EngineInterface):
             if self._xai_logger:
                 agent.xai_logger = self._xai_logger
 
-            # Inject strategy_engine into IntelAgent
-            if agent_class_name == "intel" and self._strategy_engine:
-                agent.strategy_engine = self._strategy_engine
-
             # Create AgentTask from EngineTask
             from backend.core.models import AgentTask
             agent_task = AgentTask(
@@ -212,12 +115,11 @@ class EngineInfra(EngineInterface):
             # Execute
             result = await agent.execute(agent_task)
 
-            _PARTIAL_SUCCESS = {"completed", "max_iterations_reached"}
             return EngineResult(
                 task_id=task.task_id,
                 engine_type=self.engine_type,
                 agent_results=[result],
-                status="completed" if result.status in _PARTIAL_SUCCESS else "failed",
+                status="completed" if result.status == "completed" else "failed",
             )
 
         except Exception as exc:

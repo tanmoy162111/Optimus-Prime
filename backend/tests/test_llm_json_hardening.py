@@ -52,3 +52,15 @@ class TestLLMJsonHardening:
         """Safe default must have is_terminal=False so agent loop continues."""
         result = _extract_json_from_llm_response("not json at all", "Test")
         assert result.get("is_terminal") is False
+
+    def test_json_array_returns_safe_default(self):
+        """LLM returning a JSON array must not crash callers that call .get() on the result.
+
+        Regression test for: 'list' object has no attribute 'get' in ExploitAgent dispatch.
+        """
+        result = _extract_json_from_llm_response(
+            '[{"tool": "sqlmap", "is_terminal": false}]', "ExploitAgent"
+        )
+        assert isinstance(result, dict), "must always return a dict, never a list"
+        # Safe default expected since the top-level value is a list, not an object
+        assert result.get("is_terminal") is False

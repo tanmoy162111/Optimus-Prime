@@ -21,6 +21,11 @@ SCAN_SYSTEM_PROMPT = """You are a vulnerability scanning agent. Your goal is to 
 
 Available tools: nmap, nikto, nuclei, masscan, wpscan
 
+STRICT RULES:
+- Call each tool EXACTLY ONCE. Never repeat a tool that already appears in history.
+- After all useful tools have been called, set is_terminal=true.
+- If history shows a tool was already run, skip it and pick a different unused tool.
+
 Respond with JSON: {"tool": "name", "input": {"target": "...", "flags": "..."}, "reasoning": "...", "is_terminal": false}
 When done: {"tool": null, "input": {}, "reasoning": "Scanning complete", "is_terminal": true}"""
 
@@ -154,7 +159,10 @@ def _extract_json_from_llm_response(content: str, agent_name: str) -> dict:
 
     # Strategy 1: direct parse
     try:
-        return json.loads(content)
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            return parsed
+        # Non-dict JSON (e.g. LLM returned an array) — fall through to extract object
     except json.JSONDecodeError:
         pass
 
@@ -229,6 +237,21 @@ async def _plan_with_llm(agent, task, target, system_prompt) -> AgentAction | No
     tool_input = data.get("input", {})
     if "target" not in tool_input:
         tool_input["target"] = target
-    action = AgentAction(data["tool"], tool_input, data.get("reasoning", "LLM"))
+
+    suggested_tool = data["tool"]
+
+    # Dedup guard: if LLM suggests a tool already in history, fall back to the
+    # deterministic planner which advances to the next unused step.
+    used_tools = {a["tool"] for a in agent._action_history}
+    if suggested_tool in used_tools:
+        logger.warning(
+            "_plan_with_llm (%s): LLM suggested already-used tool '%s' — using fallback planner",
+            agent.__class__.__name__, suggested_tool,
+        )
+        if hasattr(agent, '_plan_fallback'):
+            return agent._plan_fallback(target)
+        return None
+
+    action = AgentAction(suggested_tool, tool_input, data.get("reasoning", "LLM"))
     agent._action_history.append({"tool": action.tool_name, "input": action.tool_input, "reasoning": action.reasoning})
     return action

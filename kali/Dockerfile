@@ -8,8 +8,17 @@ RUN apt-get update && \
         nuclei \
         sqlmap \
         dnsrecon \
+        sublist3r \
+        amass \
+        masscan \
+        wpscan \
+        ffuf \
+        commix \
+        testssl.sh \
         whatweb \
+        exploitdb \
         curl wget \
+        python3 python3-pip \
         && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 

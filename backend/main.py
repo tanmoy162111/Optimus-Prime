@@ -307,6 +307,8 @@ async def lifespan(app: FastAPI):
 
     # Inject strategy_engine into EngineInfra (created before StrategyEvolutionEngine was ready)
     engine_infra._strategy_engine = strategy_engine
+    # Inject research_kb so ToolFallbackResolver's ResearchKB strategy is active
+    engine_infra._research_kb = research_kb
 
     # CustomToolGenerator
     custom_tool_gen = CustomToolGenerator(

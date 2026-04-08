@@ -36,6 +36,11 @@ SCOPE_SYSTEM_PROMPT = """You are a scope discovery agent. Enumerate assets and v
 Available tools: crt_sh, whois, shodan, dns_enum, github_scan
 Note: shodan is only available at stealth levels low and medium.
 
+STRICT RULES:
+- Call each tool EXACTLY ONCE. Never repeat a tool that already appears in history.
+- After all useful tools have been called, set is_terminal=true.
+- If history shows a tool was already run, skip it and pick a different unused tool.
+
 Respond with JSON: {"tool": "name", "input": {"target": "...", "flags": "..."}, "reasoning": "...", "is_terminal": false}
 When done: {"tool": null, "input": {}, "reasoning": "Scope discovery complete", "is_terminal": true}"""
 
