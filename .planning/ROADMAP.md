@@ -19,7 +19,7 @@
 
 | # | Phase | Goal | Requirements | Plans |
 |---|-------|------|--------------|-------|
-| 1 | Cleanup & Configuration | 1/3 | In Progress|  |
+| 1 | Cleanup & Configuration | 2/3 | In Progress|  |
 | 2 | Security Hardening | No host RCE, engagements filesystem-isolated, findings correctly scoped, DB durable | SEC-01, SEC-02, DATA-01, DATA-02 | TBD |
 | 3 | Orchestration Upgrade | Failures surface, LLM stack upgraded, planner decoupled from coordinator, sessions survive restarts | ORCH-01, ORCH-02, ORCH-03, PERSIST-01 | TBD |
 | 4 | Frontend Split | UI componentized, orphaned component wired, session state centralized | UI-01, UI-02, UI-03 | TBD |
@@ -37,9 +37,9 @@
   2. All tests under `backend/tests/` that previously imported from `backend/core/` or `backend/agents/` have been migrated and pass under the new `backend/agent/` paths
   3. `backend/config.py` `claude_model` reads `"claude-sonnet-4-6"`; a direct API call to Claude returns a 200 response (not a 404 that silently falls back to Ollama)
   4. The LLM router logs confirm Claude is being used for orchestration — no silent fallback events in the log during normal operation
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 - [x] 01-01-PLAN.md — Fix Claude model identifier in backend/config.py and add regression test
-- [ ] 01-02-PLAN.md — Delete 17 dead-code test files and repoint pyproject.toml testpaths at tests/
+- [x] 01-02-PLAN.md — Delete 17 dead-code test files and repoint pyproject.toml testpaths at tests/
 - [ ] 01-03-PLAN.md — Migrate 9 preserved tests, delete backend/main.py + backend/core/ + backend/agents/ + backend/tests/
 **UI hint**: no
 
