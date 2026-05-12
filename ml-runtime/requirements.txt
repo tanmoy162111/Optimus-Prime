@@ -1,0 +1,7 @@
+adversarial-robustness-toolbox[pytorch,tensorflow]==1.20.1
+foolbox
+torch
+tensorflow
+numpy
+scikit-learn
+promptfoo

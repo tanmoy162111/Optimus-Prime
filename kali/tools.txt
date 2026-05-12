@@ -1,0 +1,20 @@
+# Core
+python3-pip
+git
+curl
+wget
+
+# Cloud Security
+awscli
+azure-cli
+
+# IAM
+python3-jwt
+
+# Data Security
+trufflehog
+testssl.sh
+
+# Endpoint / LOtL
+powershell
+python3-impacket

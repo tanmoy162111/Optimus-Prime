@@ -1,140 +1,127 @@
-# Optimus Prime v2.0 — Docker Compose (9 Services)
-# Section 17.1 of the architecture specification
-# Local deployment — cloud-portable by design
+version: "3.8"
 
 services:
-  # --- Frontend ---
-  frontend:
-    image: node:20-alpine
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-    working_dir: /app
-    command: sh -c "npm install && npm run dev"
-    depends_on:
-      - backend
-    networks:
-      - optimus_net
-    restart: unless-stopped
-
-  # --- Backend (FastAPI) ---
   backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
-    image: optimus-backend:latest
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: optimus_backend
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/app/backend
-      - optimus_sessions:/app/data/sessions
-      - optimus_events:/app/data/events
-      - optimus_xai:/app/data/xai
-      - ml_runtime_ipc:/app/data/ml-runtime-ipc
-      - ics_runtime_ipc:/app/data/ics-runtime-ipc
-      - optimus_memory:/app/data/memory
-      - client_profiles:/app/data/client_profiles
     environment:
-      - PYTHONPATH=/app
-    env_file:
-      - .env
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPTIMUS_API_KEY=${OPTIMUS_API_KEY}
+      - OLLAMA_HOST=http://ollama:11434
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-6}
+      - MISTRAL_MODEL=${MISTRAL_MODEL:-mistral:7b-instruct-v0.2-q4_K_M}
+      - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
+      - SESSION_TOKEN_BUDGET=${SESSION_TOKEN_BUDGET:-500000}
+      - SUMMARISER_THRESHOLD=${SUMMARISER_THRESHOLD:-60000}
+      - KALI_HOST=kali
+      - KALI_PORT=22
+      - TOR_SOCKS_HOST=tor
+      - TOR_SOCKS_PORT=9050
+      - MEMORY_DB_PATH=/app/data/optimus_memory.db
+      - INTEL_CACHE_PATH=/app/data/intel_cache
+      - REPORTS_PATH=/app/data/reports
+      - SCOPE_FILE_PATH=/app/config/scope.yaml
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - models_input:/models
+      - ml_results:/results
     depends_on:
       - ollama
       - kali
+      - tor
     networks:
-      - optimus_net
+      - optimus_internal
     mem_limit: 4g
-    cpus: 2.0
-    restart: unless-stopped
+    cpus: 2
 
-  # --- Kali Linux (Engine 1 tooling) ---
-  kali:
+  frontend:
     build:
-      context: .
-      dockerfile: kali/Dockerfile
-    image: optimus-kali:latest
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: optimus_frontend
     ports:
-      - "2222:22"
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NEXT_PUBLIC_WS_URL=ws://backend:8000
+    depends_on:
+      - backend
     networks:
-      - optimus_net
-    mem_limit: 2g
-    cpus: 1.5
-    restart: unless-stopped
+      - optimus_internal
+    mem_limit: 1g
+    cpus: 1
 
-  # --- Ollama (Gemma4 + nomic-embed-text) ---
   ollama:
-    image: ollama/ollama
+    image: ollama/ollama:latest
+    container_name: optimus_ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
     networks:
-      - optimus_net
-    mem_limit: 12g
-    cpus: 4.0
-    restart: unless-stopped
+      - optimus_internal
+    mem_limit: 8g
+    cpus: 4
+    deploy:
+      resources:
+        limits:
+          memory: 8g
 
-  # --- ML Runtime (Engine 3 — network isolated) ---
+  kali:
+    build:
+      context: ./kali
+      dockerfile: Dockerfile
+    container_name: optimus_kali
+    ports:
+      - "2222:22"
+    networks:
+      - optimus_internal
+    mem_limit: 4g
+    cpus: 2
+    volumes:
+      - kali_workspace:/home/kali/workspace
+
   ml-runtime:
     build:
-      context: .
-      dockerfile: ml-runtime/Dockerfile
-    image: optimus-ml-runtime:latest
-    network_mode: "none"
+      context: ./ml-runtime
+      dockerfile: Dockerfile
+    container_name: optimus_ml_runtime
+    network_mode: none
+    read_only: true
     volumes:
-      - ml_runtime_ipc:/data/ipc
-    mem_limit: 4g
-    cpus: 2.0
-    restart: unless-stopped
+      - models_input:/models:ro
+      - ml_results:/results
+    user: mluser
+    mem_limit: 8g
+    cpus: 4
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
-  # --- Tor Proxy (Dark web research) ---
   tor:
-    image: dperson/torproxy
+    image: dperson/torproxy:latest
+    container_name: optimus_tor
+    networks:
+      - optimus_internal
     ports:
       - "9050:9050"
-    networks:
-      - optimus_net
-    restart: unless-stopped
-
-  # --- DVWA Sandbox (Custom tool validation + E2E tests) ---
-  sandbox:
-    image: vulnerables/web-dvwa
-    ports:
-      - "8080:80"
-    networks:
-      - optimus_net
-    mem_limit: 512m
-    cpus: 0.5
-    restart: unless-stopped
-
-  # --- ICS Runtime (Engine 2 — network isolated) ---
-  ics-runtime:
-    build:
-      context: .
-      dockerfile: ics-runtime/Dockerfile
-    image: optimus-ics-runtime:latest
-    network_mode: "none"
-    volumes:
-      - ics_runtime_ipc:/data/ipc
-    mem_limit: 1g
-    cpus: 1.0
-    restart: unless-stopped
-
-  # NOTE: sandbox_manager runs as a host sidecar process, not a container.
-  # It monitors ml-runtime and ics-runtime via task_status.json watchdog.
-  # Start with: python -m backend.tools.sandbox_manager
-
-networks:
-  optimus_net:
-    driver: bridge
 
 volumes:
-  optimus_sessions:
-  optimus_events:
-  optimus_xai:
   optimus_memory:
-  client_profiles:
+  intel_cache:
+  models_input:
+  ml_results:
+  reports:
   ollama_models:
-  ml_runtime_ipc:
-  ics_runtime_ipc:
+  kali_workspace:
+
+networks:
+  optimus_internal:
+    driver: bridge
+    internal: true

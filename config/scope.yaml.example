@@ -1,0 +1,25 @@
+# Optimus Scope Configuration
+# Auto-detected at startup if not explicitly provided
+
+scope:
+  name: "default"
+  targets: []
+  allowlist: []
+  denylist: []
+
+stealth_level: medium  # low | medium | high
+
+execution_modes:
+  passive_recon: true
+  active_scan: true
+  exploitation: false
+  endpoint_advanced: false
+
+rate_limits:
+  requests_per_minute: 60
+  concurrent_tools: 3
+
+reporting:
+  include_evidence: true
+  include_xai_log: true
+  format: pdf  # pdf | md | html
