@@ -291,11 +291,10 @@ class CustomToolGenerator:
         description = f"Auto-generated tool for: {vulnerability_context[:100]}"
 
         if self._llm:
-            from backend.core.llm_router import LLMMessage
             response = await self._llm.complete(
-                messages=[LLMMessage(
-                    role="user",
-                    content=(
+                messages=[{
+                    "role": "user",
+                    "content": (
                         f"Generate a Python security tool for this vulnerability:\n"
                         f"{vulnerability_context}\n\n"
                         f"Research context:\n{research_context}\n\n"
@@ -306,10 +305,8 @@ class CustomToolGenerator:
                         f"- Output findings as JSON to stdout\n"
                         f"Return ONLY the Python code."
                     ),
-                )],
-                system_prompt="You are a security tool generator. Output only valid Python code.",
-                max_tokens=2048,
-                temperature=0.3,
+                }],
+                system="You are a security tool generator. Output only valid Python code.",
             )
             code = response.content
         else:
@@ -484,22 +481,17 @@ class CustomToolGenerator:
         return tool.state.value
 
     def _register_tool(self, tool: GeneratedTool) -> None:
-        """Register an approved tool in the tool registry."""
-        from backend.tools.tool_spec import ToolSpec
-        from backend.core.models import StealthProfile, EngineType, ToolBackendType, ToolPromotion
+        """Register an approved tool in the tool registry.
 
-        spec = ToolSpec(
-            name=tool.name,
-            description=tool.description,
-            input_schema={"type": "object", "properties": {"target": {"type": "string"}}},
-            required_permission="execute",
-            backend=ToolBackendType.LOCAL,
-            stealth_profile=StealthProfile(min_stealth_level="low"),
-            engine_scope=[EngineType.INFRASTRUCTURE],
-            timeout_seconds=120,
-            promotion_state=ToolPromotion.OPERATOR_APPROVED,
+        NOTE: Full ToolSpec registration requires backend.tools.tool_spec and
+        backend.core.models which were removed in Phase 01 cleanup. This method
+        is stubbed until Phase 2 rebuilds the tool registry subsystem.
+        """
+        raise NotImplementedError(
+            "_register_tool() requires ToolSpec and model types from the deleted "
+            "backend.tools.tool_spec / backend.core.models modules. "
+            "Implement in Phase 2 when the tool registry is rebuilt."
         )
-        self._tool_registry[tool.name] = spec
 
     async def full_pipeline(
         self,
