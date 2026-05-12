@@ -5,7 +5,7 @@ description = "Universal AI Security Platform — v2.0"
 requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
+testpaths = ["tests"]
 asyncio_mode = "auto"
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
