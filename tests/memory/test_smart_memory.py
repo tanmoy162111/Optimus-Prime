@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import pytest
 
-from backend.memory.smart_memory import SmartMemory, _cosine_similarity
+from backend.memory.smart_memory import SmartMemory
 
 
 # ---------------------------------------------------------------------------
