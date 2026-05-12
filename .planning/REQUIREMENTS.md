@@ -8,7 +8,7 @@
 ### CLEAN — Dead Code & Configuration
 
 - [ ] **CLEAN-01**: Old backend system (`backend/main.py`, `backend/core/`, `backend/agents/`) is deleted and all tests previously importing from those paths are migrated to new module paths under `backend/agent/`
-- [ ] **CLEAN-02**: `claude_model` config value is corrected to `"claude-sonnet-4-6"` so all Claude API calls succeed without falling back to Ollama silently
+- [x] **CLEAN-02**: `claude_model` config value is corrected to `"claude-sonnet-4-6"` so all Claude API calls succeed without falling back to Ollama silently
 
 ### SEC — Security & Execution Isolation
 
@@ -63,7 +63,7 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CLEAN-01 | Phase 1 — Cleanup & Configuration | Pending |
-| CLEAN-02 | Phase 1 — Cleanup & Configuration | Pending |
+| CLEAN-02 | Phase 1 — Cleanup & Configuration | Complete |
 | SEC-01 | Phase 2 — Security Hardening | Pending |
 | SEC-02 | Phase 2 — Security Hardening | Pending |
 | DATA-01 | Phase 2 — Security Hardening | Pending |
