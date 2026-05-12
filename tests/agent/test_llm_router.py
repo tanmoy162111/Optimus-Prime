@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.agent.llm_router import LLMRouter, LLMResponse
+from backend import config
 
 
 @pytest.mark.asyncio
@@ -38,3 +39,25 @@ async def test_complete_includes_system_prompt_when_provided():
 
     call_kwargs = mock_create.call_args.kwargs
     assert call_kwargs["system"] == system
+
+
+def test_claude_model_is_sonnet_4_6():
+    """Regression: claude_model must be 'claude-sonnet-4-6' or Claude API 404s and silently falls back to Ollama."""
+    assert config.settings.claude_model == "claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_complete_passes_claude_sonnet_4_6_model_to_sdk():
+    """Verify the configured claude_model flows through to the Anthropic SDK call kwargs."""
+    router = LLMRouter()
+    messages = [{"role": "user", "content": "ping"}]
+
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="pong")]
+    mock_response.usage = MagicMock(input_tokens=1, output_tokens=1)
+
+    with patch.object(router.claude.messages, "create", new=AsyncMock(return_value=mock_response)) as mock_create:
+        await router.complete(messages=messages, mode="orchestration")
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["model"] == "claude-sonnet-4-6"
