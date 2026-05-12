@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     bearer_token: str = "dev-token"
     anthropic_api_key: str = ""
     ollama_host: str = "http://localhost:11434"
-    claude_model: str = "claude-opus-4-7"
+    claude_model: str = "claude-sonnet-4-6"
     mistral_model: str = "mistral:7b"
     embed_model: str = "nomic-embed-text"
     kali_host: str = "localhost"
