@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-03-PLAN.md — Phase 1 complete, all 3 plans done
-last_updated: "2026-05-12T04:59:17.570Z"
+status: verifying
+stopped_at: Completed 01-04-PLAN.md — Phase 01 gap closure complete, all 4 plans done
+last_updated: "2026-05-12T05:06:11.981Z"
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -26,7 +26,7 @@ Phase: 01 (cleanup-configuration) — EXECUTING
 Plan: 1 of 4
 **Phase:** 1 of 4 — Cleanup & Configuration
 **Plan:** 3 of 3 — All plans executed
-**Status:** Executing Phase 01
+**Status:** Phase complete — ready for verification
 
 ## Progress
 
@@ -48,6 +48,7 @@ Requirements satisfied: 1 / 13
 | 01    | 01   | 5min     | 2     | 2     |
 | 01    | 02   | 15min    | 3     | 19    |
 | 01    | 03   | 24min    | 4     | 25    |
+| 01    | 04   | 7min     | 1     | 1     |
 
 ## Accumulated Context
 
@@ -65,6 +66,8 @@ Requirements satisfied: 1 / 13
 - [01-03] SmartMemory is a basic stub (no embedding_fn, store_finding, detect_systemic) — 11 tests xfailed for Phase 2 tracking
 - [01-03] custom_tool_generator._register_tool() references deleted backend.tools.tool_spec — 4 tests xfailed for Phase 2 tracking
 - [01-03] CLEAN-01 satisfied: backend/core, backend/agents, backend/main.py, backend/tests all deleted; 144 tests pass, zero residual imports
+- [01-04] Use NotImplementedError stub for _register_tool() — raises immediately vs. deferring to runtime ModuleNotFoundError when deleted module is imported
+- [01-04] LLMRouter.complete() takes plain dict messages (role/content keys) and system= parameter — not LLMMessage objects or system_prompt= parameter
 
 ### Known Blockers
 
@@ -73,11 +76,11 @@ Requirements satisfied: 1 / 13
 ### Open TODOs
 
 - SmartMemory needs full implementation (embedding_fn, store_finding, detect_systemic, get_best_tools) — 11 tests xfailed
-- custom_tool_generator._register_tool() dependency on deleted tool_spec needs resolution — 4 tests xfailed
+- custom_tool_generator._register_tool() dependency on deleted tool_spec needs Phase 2 resolution — 4 tests xfailed (NotImplementedError stub now in place)
 - Phase 2 (Security Hardening): Docker sandbox, WAL mode, VerificationLoop scoping, per-engagement Kali workdirs
 
 ## Session Continuity
 
-Last session: 2026-05-12T04:39:57Z
-Stopped at: Completed 01-03-PLAN.md — Phase 1 complete, all 3 plans done
+Last session: 2026-05-12T05:06:11.977Z
+Stopped at: Completed 01-04-PLAN.md — Phase 01 gap closure complete, all 4 plans done
 Resume file: None
