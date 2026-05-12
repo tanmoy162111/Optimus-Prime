@@ -35,8 +35,8 @@ A solo operator can run a complete structured pentest engagement — from scopin
 <!-- Building toward these. Current milestone: stabilize and harden the foundation. -->
 
 **Milestone 1 — Critical Bug Fixes & Dead Code Removal**
-- [ ] Delete old backend system (`backend/main.py`, `backend/core/`, `backend/agents/`) and migrate tests that import from them
-- [ ] Fix model string: `claude_model` must be `"claude-sonnet-4-6"` (current value `"claude-opus-4-7"` causes every Claude call to 404)
+- [x] Delete old backend system (`backend/main.py`, `backend/core/`, `backend/agents/`) and migrate tests that import from them — Validated in Phase 1: Cleanup & Configuration
+- [x] Fix model string: `claude_model` is now `"claude-sonnet-4-6"` — Validated in Phase 1: Cleanup & Configuration
 - [ ] Docker sandbox for generated tool execution (replace `asyncio.create_subprocess_exec` host subprocess — RCE risk)
 - [ ] SQLite WAL mode on every connection (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`)
 - [ ] Per-engagement Kali working directories (`/engagements/{engagement_id}/` on SSH host)
@@ -63,9 +63,9 @@ A solo operator can run a complete structured pentest engagement — from scopin
 
 ## Context
 
-**Architecture state:** Two parallel backend systems exist. The new system (`backend/agent/`, `backend/app.py`) is canonical and active. The old system (`backend/core/`, `backend/agents/`, `backend/main.py`) is dead code but physically present — causing import confusion, test conflicts, and maintenance burden. Tests in `backend/tests/` import from the old system; tests in `tests/` import from the new system.
+**Architecture state (Phase 1 complete):** Single canonical backend system. Old system (`backend/core/`, `backend/agents/`, `backend/main.py`) deleted. All tests unified under `tests/` — 144 passing, 2 skipped, 15 xfailed (known stubs). `backend/intelligence/custom_tool_generator.py` has NotImplementedError stubs for tool registration (requires Phase 2 tool registry).
 
-**Critical runtime bug:** Every Claude API call currently fails silently (404 from invalid model name `claude-opus-4-7`) and falls back to Ollama. The operator believes they're getting Claude orchestration but is not.
+**Model config:** `claude_model = "claude-sonnet-4-6"` — Claude API calls now succeed. Human verification of live API (no Ollama fallback) is pending (tracked in 01-HUMAN-UAT.md).
 
 **Security risk:** Tool execution sandbox is `asyncio.create_subprocess_exec("python3", ...)` running generated code directly on the host process. Docker isolation is required before using this against real targets.
 
@@ -85,7 +85,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| New `backend/agent/` system is canonical; old `backend/core/` is dead | Dual systems cause import confusion and test failures | — Pending (delete required) |
+| New `backend/agent/` system is canonical; old `backend/core/` is dead | Dual systems cause import confusion and test failures | ✓ Completed — Phase 1 |
 | Docker sandbox for tool execution, not subprocess | Generated code on host = RCE risk during real engagements | — Pending |
 | WAL mode for all SQLite connections | Concurrent reads/writes during active engagement need non-blocking I/O | — Pending |
 | DeepSeek-V3 for orchestration (future) | Better performance/cost ratio for long-context pentest reasoning vs Claude | — Pending |
@@ -110,4 +110,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-12 after initialization*
+*Last updated: 2026-05-12 after Phase 1: Cleanup & Configuration*
