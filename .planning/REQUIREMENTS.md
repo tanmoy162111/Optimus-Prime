@@ -60,29 +60,27 @@
 
 ## Traceability
 
-*(Populated by roadmapper — pending)*
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLEAN-01 | — | Pending |
-| CLEAN-02 | — | Pending |
-| SEC-01 | — | Pending |
-| SEC-02 | — | Pending |
-| DATA-01 | — | Pending |
-| DATA-02 | — | Pending |
-| ORCH-01 | — | Pending |
-| ORCH-02 | — | Pending |
-| ORCH-03 | — | Pending |
-| PERSIST-01 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
+| CLEAN-01 | Phase 1 — Cleanup & Configuration | Pending |
+| CLEAN-02 | Phase 1 — Cleanup & Configuration | Pending |
+| SEC-01 | Phase 2 — Security Hardening | Pending |
+| SEC-02 | Phase 2 — Security Hardening | Pending |
+| DATA-01 | Phase 2 — Security Hardening | Pending |
+| DATA-02 | Phase 2 — Security Hardening | Pending |
+| ORCH-01 | Phase 3 — Orchestration Upgrade | Pending |
+| ORCH-02 | Phase 3 — Orchestration Upgrade | Pending |
+| ORCH-03 | Phase 3 — Orchestration Upgrade | Pending |
+| PERSIST-01 | Phase 3 — Orchestration Upgrade | Pending |
+| UI-01 | Phase 4 — Frontend Split | Pending |
+| UI-02 | Phase 4 — Frontend Split | Pending |
+| UI-03 | Phase 4 — Frontend Split | Pending |
 
 **Coverage:**
 - v1 requirements: 13 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 after initial definition*
+*Last updated: 2026-05-12 — traceability populated by roadmapper*
