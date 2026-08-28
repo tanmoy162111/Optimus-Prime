@@ -55,6 +55,10 @@ class ClientProfileDB:
                 sqlite3.connect, str(self._db_path), check_same_thread=False,
             )
             self._conn.row_factory = sqlite3.Row
+            await asyncio.to_thread(self._conn.execute, "PRAGMA journal_mode=WAL")
+            # NOTE: journal_mode persists in the DB file; synchronous does NOT —
+            # must be reissued on every new connection (see RESEARCH.md Pitfall #4).
+            await asyncio.to_thread(self._conn.execute, "PRAGMA synchronous=NORMAL")
             await asyncio.to_thread(
                 self._conn.executescript,
                 """
