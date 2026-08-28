@@ -20,7 +20,7 @@
 | # | Phase | Goal | Requirements | Plans |
 |---|-------|------|--------------|-------|
 | 1 | Cleanup & Configuration | 4/4 | Complete   | 2026-05-12 |
-| 2 | Security Hardening | No host RCE, engagements filesystem-isolated, findings correctly scoped, DB durable | SEC-01, SEC-02, DATA-01, DATA-02 | TBD |
+| 2 | Security Hardening | No host RCE, engagements filesystem-isolated, findings correctly scoped, DB durable | SEC-01, SEC-02, DATA-01, DATA-02 | 4 |
 | 3 | Orchestration Upgrade | Failures surface, LLM stack upgraded, planner decoupled from coordinator, sessions survive restarts | ORCH-01, ORCH-02, ORCH-03, PERSIST-01 | TBD |
 | 4 | Frontend Split | UI componentized, orphaned component wired, session state centralized | UI-01, UI-02, UI-03 | TBD |
 
@@ -52,7 +52,11 @@
   2. Starting two concurrent engagements and issuing Kali SSH commands in each produces output files in `/engagements/{engagement_id_A}/` and `/engagements/{engagement_id_B}/` respectively, with no cross-contamination
   3. Every SQLite connection in the application responds to `PRAGMA journal_mode;` with `wal` — verified via a startup health log entry or direct DB query
   4. Verifying the same finding ID from two separate concurrent engagements does not exhaust or share each other's request budget — each engagement's counter is independent
-**Plans:** TBD
+**Plans:** 4 plans (all Wave 1, parallel — no file overlap)
+- [ ] 02-01-PLAN.md — SEC-01: Docker container isolation in sandbox.py via docker-py (DooD per D-10)
+- [ ] 02-02-PLAN.md — SEC-02: per-engagement Kali workdir scoping in ShellManager + 7 sub-agents
+- [ ] 02-03-PLAN.md — DATA-01: WAL + synchronous=NORMAL pragmas in ClientProfileDB and ResearchKB
+- [ ] 02-04-PLAN.md — DATA-02: engagement-scoped VerificationLoop budget stub
 **UI hint**: no
 
 ### Phase 3: Orchestration Upgrade
@@ -85,6 +89,6 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Cleanup & Configuration | 0/3 | Planned | - |
-| 2. Security Hardening | 0/0 | Not started | - |
+| 2. Security Hardening | 0/4 | Planned | - |
 | 3. Orchestration Upgrade | 0/0 | Not started | - |
 | 4. Frontend Split | 0/0 | Not started | - |
