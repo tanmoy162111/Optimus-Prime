@@ -16,15 +16,20 @@ class CloudAgent(BaseAgent):
         
         provider = kwargs.get("provider", "auto")
         command_type = kwargs.get("command", "scoutsuite")
-        
-        ssh = SSHClient()
-        shell = ShellManager(ssh)
-        
+
+        # NOTE (T-02-06): provider/target are interpolated into shell commands
+        # below via unescaped f-strings, a pre-existing command-injection-shaped
+        # pattern observed but explicitly out of scope for SEC-02 (workdir
+        # scoping only).
+        engagement_id = kwargs.get("engagement_id", "default")
+        ssh = SSHClient(engagement_id=engagement_id)
+        shell = ShellManager(ssh, engagement_id=engagement_id)
+
         if provider == "auto":
             provider = self._detect_provider(target)
-        
+
         if command_type == "scoutsuite":
-            cmd = f"scoutsuite --provider {provider} --report-dir /tmp/cloud"
+            cmd = f"scoutsuite --provider {provider} --report-dir cloud"
         elif command_type == "prowler":
             cmd = f"prowler {provider} --csv"
         elif command_type == "pacu":

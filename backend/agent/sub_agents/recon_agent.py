@@ -13,12 +13,16 @@ class ReconAgent(BaseAgent):
     async def execute(self, target: str, **kwargs):
         from backend.execution.ssh_client import SSHClient
         from backend.execution.shell_manager import ShellManager
-        
-        ssh = SSHClient()
-        shell = ShellManager(ssh)
-        
+
+        # NOTE (T-02-06): target is interpolated into shell commands below via
+        # unescaped f-strings, a pre-existing command-injection-shaped pattern
+        # observed but explicitly out of scope for SEC-02 (workdir scoping only).
+        engagement_id = kwargs.get("engagement_id", "default")
+        ssh = SSHClient(engagement_id=engagement_id)
+        shell = ShellManager(ssh, engagement_id=engagement_id)
+
         commands = [
-            f"sublist3r -d {target} -o /tmp/recon.txt",
+            f"sublist3r -d {target} -o recon.txt",
             f"amass enum -d {target}",
             f"theHarvester -d {target} -b all",
         ]

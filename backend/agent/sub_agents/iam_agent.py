@@ -15,10 +15,14 @@ class IAMAgent(BaseAgent):
         from backend.execution.shell_manager import ShellManager
         
         assessment_type = kwargs.get("type", "auto")
-        
-        ssh = SSHClient()
-        shell = ShellManager(ssh)
-        
+
+        # NOTE (T-02-06): target is interpolated into shell commands below via
+        # unescaped f-strings, a pre-existing command-injection-shaped pattern
+        # observed but explicitly out of scope for SEC-02 (workdir scoping only).
+        engagement_id = kwargs.get("engagement_id", "default")
+        ssh = SSHClient(engagement_id=engagement_id)
+        shell = ShellManager(ssh, engagement_id=engagement_id)
+
         if assessment_type == "jwt" or self._is_jwt_target(target):
             result = await self._assess_jwt(target, shell)
         elif assessment_type == "oauth":
