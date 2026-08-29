@@ -7,8 +7,9 @@ logger = logging.getLogger(__name__)
 
 
 class SSHClient:
-    def __init__(self):
+    def __init__(self, engagement_id: Optional[str] = None):
         self.client: Optional[paramiko.SSHClient] = None
+        self.engagement_id = engagement_id
 
     async def connect(self) -> paramiko.SSHClient:
         if self.client is None:
