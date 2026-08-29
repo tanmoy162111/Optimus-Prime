@@ -5,6 +5,8 @@ Validates auto-match accuracy >= 90% on test dataset of 20 clients.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from backend.memory.client_profile import ClientProfile, ClientProfileDB
@@ -176,3 +178,21 @@ class TestClientProfileCRUD:
         sqli = [w for w in profile.recurring_weaknesses if "SQL" in w.get("title", "")]
         assert len(sqli) == 1
         assert sqli[0]["occurrences"] == 2
+
+
+class TestClientProfileWAL:
+    """DATA-01: ClientProfileDB must apply WAL mode on connect."""
+
+    @pytest.mark.asyncio
+    async def test_journal_mode_is_wal(self, tmp_path):
+        """After initialize(), journal_mode should read back as 'wal'."""
+        db = ClientProfileDB(db_path=tmp_path / "wal.db")
+        await db.initialize()
+        try:
+            row = await asyncio.to_thread(
+                db._conn.execute, "PRAGMA journal_mode"
+            )
+            result = row.fetchone()
+            assert result[0].lower() == "wal"
+        finally:
+            await db.close()
