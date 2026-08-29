@@ -46,7 +46,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 
 **Milestone 2 — Orchestration Upgrade**
 - [ ] PHASE_FAILED event propagation through the agent loop
-- [ ] DeepSeek-V3 as primary orchestration LLM in LLMRouter; Qwen 7B for compaction
+- [ ] LLMRouter extended to multi-provider task-based routing (Claude + Ollama + DeepSeek/other API providers as needed) — not a wholesale swap off Claude
 - [ ] OmX template-first planner: 8-directive planning DAG, separate from OmO coordinator
 - [ ] Session persistence to disk + reconnect (currently pure in-memory; process restart loses all sessions)
 
@@ -73,7 +73,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 
 **Correction (2026-08-29, during v1.1 milestone gap analysis):** The "Validated" bullets for `ReportGenerator`/`ResearchKB`+`ResearchDaemon` were inaccurate — code exists on disk (`backend/reporting/intelligent_reporter.py`, `backend/intelligence/research_daemon.py`, `backend/intelligence/research_kb.py`) but neither is imported anywhere in the live orchestrator/api/app path. Same is true of `intel_bus.py`, `dark_web_intel.py`, `source_adapters.py`, `client_profile.py`, `custom_tool_generator.py`, and `compliance_mapping.py` — all orphaned. Removed from Validated; wiring these up is v1.1 milestone scope (see planned Phases 7–10: Semantic Memory & Client Profiles, Threat Intel & Attribution, Auto Research & Strategy Evolution, Report Mode Suite).
 
-**LLM stack:** Claude (Anthropic SDK) + Ollama/Mistral fallback. Mentor recommendation: switch orchestration to DeepSeek-V3, Qwen 7B for compaction. Retain Claude for specific analysis tasks.
+**LLM stack (revised 2026-08-29):** Claude (Anthropic SDK) + Ollama/Mistral fallback today. Mentor's original recommendation was to *swap* orchestration to DeepSeek-V3 — that conflicted with the project's Anthropic+Ollama-only constraint. Resolved during Phase 3 planning: constraint updated to explicitly allow multi-provider routing (operator's call, not a swap). LLMRouter becomes task-based multi-provider (Claude for complex reasoning, Ollama/Qwen for compaction, DeepSeek or other API providers as additional options) rather than replacing Claude outright.
 
 **Mentor architecture target:** 7-layer design — Operator → Gateway → EngagementSession → Coordination (OmO+OmX) → Agents → Tool Execution → Data.
 
@@ -82,7 +82,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 - **Personal use:** Single operator, no auth hardening beyond static bearer token required for now
 - **Tech stack:** Python/FastAPI backend, React frontend — no stack changes
 - **Kali connection:** SSH via Paramiko — operator manages their own Kali instance
-- **LLM providers:** Anthropic SDK + Ollama local — no cloud GPU spend beyond API calls
+- **LLM providers:** Multi-provider by design — Anthropic SDK + Ollama local + additional pay-per-call API providers (e.g. DeepSeek) as orchestration needs dictate. No rented/provisioned cloud GPU infrastructure — API-metered spend only. (Revised 2026-08-29 — see Key Decisions)
 - **No breaking changes to BaseAgent loop** — mentor confirmed this abstraction is correct; all agents inherit from it
 
 ## Key Decisions
@@ -92,7 +92,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 | New `backend/agent/` system is canonical; old `backend/core/` is dead | Dual systems cause import confusion and test failures | ✓ Completed — Phase 1 |
 | Docker sandbox for tool execution, not subprocess | Generated code on host = RCE risk during real engagements | ✓ Good — Phase 2 |
 | WAL mode for all SQLite connections | Concurrent reads/writes during active engagement need non-blocking I/O | ✓ Good — Phase 2 |
-| DeepSeek-V3 for orchestration (future) | Better performance/cost ratio for long-context pentest reasoning vs Claude | — Pending |
+| Multi-provider LLMRouter (not a Claude swap) | Original mentor recommendation was to replace Claude with DeepSeek-V3 wholesale, which conflicted with the Anthropic+Ollama-only constraint. Operator chose multi-provider routing instead — DeepSeek and others become additional options, task-routed, not a replacement | ✓ Good — decided during Phase 3 planning |
 | Per-engagement Kali workdirs | Commands from different sessions must not bleed into same filesystem state | ✓ Good — Phase 2 (component-level; orchestrator still doesn't call sub-agents, pre-existing gap outside Phase 2 scope) |
 | Docker-outside-of-Docker (DooD) for sandbox isolation | Smaller change than a host-level sidecar process; backend container gains host Docker access as a tradeoff, accepted given single-operator use and zero live callers this phase | ✓ Good — Phase 2 (D-10) |
 | Frontend component split after backend stabilizes | App.jsx monolith acceptable until backend is correct; don't split before foundation is solid | — Pending |

@@ -60,12 +60,12 @@
 **UI hint**: no
 
 ### Phase 3: Orchestration Upgrade
-**Goal:** The operator sees phase failures surface in the chat UI instead of silent drops, the platform uses DeepSeek-V3 for orchestration reasoning, the OmX planner operates independently of the OmO coordinator, and restarting the backend does not lose an active engagement.
+**Goal:** The operator sees phase failures surface in the chat UI instead of silent drops, the LLMRouter supports multi-provider task-based routing (Claude + Ollama + additional API providers like DeepSeek, not a wholesale swap off Claude), the OmX planner operates independently of the OmO coordinator, and restarting the backend does not lose an active engagement.
 **Depends on:** Phase 2
 **Requirements:** ORCH-01, ORCH-02, ORCH-03, PERSIST-01
 **Success Criteria** (what must be TRUE):
   1. When an agent phase fails, the operator receives a `PHASE_FAILED` event in the WebSocket stream naming which phase failed and why — the failure is never silently swallowed
-  2. A successful chat message processed by the backend logs show `LLMRouter: using DeepSeek-V3` for orchestration and `Qwen-7B` for compaction; Claude is invoked only for designated analysis tasks
+  2. `LLMRouter` supports task-based routing across multiple configured providers (Claude, Ollama, and at least one additional API provider such as DeepSeek); a successful chat message's logs show which provider handled orchestration vs. compaction — Claude remains a fully supported, non-removed provider (exact provider-per-task mix is an operator/CONTEXT.md decision, not a fixed swap)
   3. An OmX planning request produces a logged 8-directive DAG and the OmO coordinator log shows it consuming that plan — the two components are traceable as separate concerns in logs
   4. After a deliberate backend process restart mid-engagement, the operator can reconnect with the same session ID and the conversation history, scope, and phase status are restored from disk
 **Plans:** TBD

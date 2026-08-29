@@ -12,7 +12,7 @@ A personal-use AI security platform that orchestrates autonomous penetration tes
 - **Personal use:** Single operator, no auth hardening beyond static bearer token required for now
 - **Tech stack:** Python/FastAPI backend, React frontend — no stack changes
 - **Kali connection:** SSH via Paramiko — operator manages their own Kali instance
-- **LLM providers:** Anthropic SDK + Ollama local — no cloud GPU spend beyond API calls
+- **LLM providers:** Multi-provider by design — Anthropic SDK + Ollama local + additional pay-per-call API providers (e.g. DeepSeek) as orchestration needs dictate. No rented/provisioned cloud GPU infrastructure — API-metered spend only.
 - **No breaking changes to BaseAgent loop** — mentor confirmed this abstraction is correct; all agents inherit from it
 <!-- GSD:project-end -->
 
