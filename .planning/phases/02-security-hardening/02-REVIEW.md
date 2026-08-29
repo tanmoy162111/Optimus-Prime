@@ -30,6 +30,7 @@ findings:
   info: 2
   total: 9
 status: issues_found
+critical_resolved: 2026-08-29T10:45:00Z
 ---
 
 # Phase 2: Code Review Report
@@ -37,7 +38,7 @@ status: issues_found
 **Reviewed:** 2026-08-29T10:07:39Z
 **Depth:** standard
 **Files Reviewed:** 20
-**Status:** issues_found
+**Status:** issues_found (both critical findings fixed — see Resolution)
 
 ## Summary
 
@@ -204,6 +205,19 @@ if base in MULTI_LABEL_SUFFIXES:
 **File:** `backend/agent/sub_agents/data_sec_agent.py:73, 116`
 **Issue:** `import re` is repeated inside both `_scan_tls()` and `_scan_pii()` rather than imported once at module level (the rest of the file's imports, and the project's own convention per `CLAUDE.md`, favor top-of-file imports).
 **Fix:** Move `import re` to the top of the file alongside the (implicit) module imports and remove both local copies.
+
+---
+
+## Resolution
+
+Both critical findings were fixed directly (not via `--fix` subagent) before phase verification:
+
+- **CR-01** — fixed in `af7b31a`: `SSHClient.connect()`/`execute()` now wrap the blocking paramiko calls in `asyncio.to_thread`. New regression test `tests/execution/test_ssh_client.py` (mocks `paramiko.SSHClient` as a plain `MagicMock`, not `AsyncMock`, so an accidental `await` on a non-awaitable fails loudly).
+- **CR-02** — fixed in `ca1da9f`: `run_tool_code()` validates `tool_name` against `^[A-Za-z0-9_-]{1,64}$` before it touches any path or tar entry name; the dead host-side temp-file write (unused since this phase's DooD/`put_archive()` rewrite) was removed rather than sanitized. New tests in `tests/tools/test_sandbox_docker.py::TestSandboxToolNameValidation`.
+
+Full suite after both fixes: 158 passed, 0 failures, 0 regressions (`pytest tests/ --deselect tests/intelligence/test_custom_tool_generator.py::TestG2Sandbox::test_sandbox_timeout` — that one deselected test is a pre-existing, unrelated hang predating this phase, see `02-01-SUMMARY.md` Deviations).
+
+The 5 warnings and 2 info findings were left as-is — none block SEC-01/SEC-02/DATA-01/DATA-02, and several (engagement_id wiring, sqlite race) are more naturally addressed once Phase 3 (Orchestration Upgrade) wires the sub-agents to a live caller.
 
 ---
 
