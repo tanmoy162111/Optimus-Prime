@@ -128,3 +128,33 @@ class TestSandboxDockerIsolation:
 
         assert result["status"] == "timeout"
         assert after <= before
+
+
+class TestSandboxToolNameValidation:
+    """CR-02: tool_name must be rejected before it reaches any filesystem/tar path.
+
+    No Docker daemon required — validation happens before any container work.
+    """
+
+    @pytest.mark.asyncio
+    async def test_path_traversal_tool_name_rejected(self):
+        backend = SandboxOnDemandBackend()
+
+        result = await backend.run_tool_code(
+            "print('x')", "../../../../tmp/evil", target="http://sandbox:80",
+        )
+
+        assert result["status"] == "error"
+        assert "Invalid tool_name" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_safe_tool_name_passes_validation(self):
+        """A conforming tool_name is not rejected by the validator (may still
+        error later if no Docker daemon is reachable in this environment)."""
+        backend = SandboxOnDemandBackend()
+
+        result = await backend.run_tool_code(
+            "print('x')", "safe_tool-123", target="http://sandbox:80",
+        )
+
+        assert result.get("error", "").startswith("Invalid tool_name") is False

@@ -19,9 +19,8 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 import tarfile
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import docker
@@ -30,6 +29,11 @@ from docker.errors import APIError, ContainerError, ImageNotFound
 logger = logging.getLogger(__name__)
 
 SANDBOX_TIMEOUT = 120  # Maximum execution time in seconds
+
+# Tool names become both a Docker tar-archive entry name and (historically) a
+# host filesystem path segment. Restricting to a conservative allowlist closes
+# both path-traversal (host) and tar-slip (container) vectors — CR-02.
+_SAFE_TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Minimal stdlib-only base image (RESEARCH.md Open Question #2). v1.1 Phase 9
 # may swap this for a custom image pre-loaded with common libraries once real
@@ -45,7 +49,7 @@ class SandboxOnDemandBackend:
       - Timeout enforcement (max 120s), container killed+removed on timeout
       - Output capture for effectiveness scoring
       - Ephemeral container removal after every run (no leaked containers)
-      - Temporary file cleanup after execution
+      - tool_name validated against an allowlist before use in any path/archive entry
     """
 
     def __init__(self, dvwa_url: str = "http://sandbox:80") -> None:
@@ -77,17 +81,21 @@ class SandboxOnDemandBackend:
 
         Args:
             code: Python source code to execute.
-            tool_name: Name for the tool (used in temp file).
+            tool_name: Name for the tool (used as the in-container script filename).
             target: Target URL/host for the tool.
             timeout: Maximum execution seconds.
 
         Returns:
             Dict with status, output, effectiveness metrics.
         """
-        # Write code to temp file
-        tmp_dir = Path(tempfile.mkdtemp(prefix="optimus_sandbox_"))
-        script_path = tmp_dir / f"{tool_name}.py"
-        script_path.write_text(code)
+        if not _SAFE_TOOL_NAME.match(tool_name):
+            return {
+                "status": "error",
+                "tool": tool_name,
+                "error": f"Invalid tool_name: {tool_name!r}",
+                "passed": False,
+                "effectiveness_score": 0.0,
+            }
 
         try:
             try:
@@ -142,14 +150,6 @@ class SandboxOnDemandBackend:
                 "passed": False,
                 "effectiveness_score": 0.0,
             }
-
-        finally:
-            # Cleanup
-            try:
-                script_path.unlink(missing_ok=True)
-                tmp_dir.rmdir()
-            except OSError:
-                pass
 
     @staticmethod
     def _build_script_tar(tool_name: str, code: str) -> bytes:
