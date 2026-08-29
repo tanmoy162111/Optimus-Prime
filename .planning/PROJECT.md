@@ -26,8 +26,10 @@ A solo operator can run a complete structured pentest engagement — from scopin
 - ✓ Paramiko-based Kali SSH client — `backend/execution/ssh_client.py`
 - ✓ CredentialVault injection pattern — `backend/agent/credential_vault.py`
 - ✓ XAILogger (explainable AI decision log) — `backend/reporting/explainable_ai.py`
-- ✓ ReportGenerator (multi-format output) — `backend/reporting/intelligent_reporter.py`
-- ✓ ResearchKB + ResearchDaemon (vulnerability knowledge base + nightly crawler) — `backend/knowledge/`
+- ✓ Docker sandbox isolation for generated tool execution (DooD) — `backend/tools/backends/sandbox.py` — Validated in Phase 2: Security Hardening (unwired — zero live callers, correct-and-ready per D-02)
+- ✓ Per-engagement Kali workdir scoping in SSHClient/ShellManager — `backend/execution/ssh_client.py`, `backend/execution/shell_manager.py` — Validated in Phase 2: Security Hardening
+- ✓ SQLite WAL mode on ClientProfileDB and ResearchKB connections — `backend/memory/client_profile.py`, `backend/intelligence/research_kb.py` — Validated in Phase 2: Security Hardening
+- ✓ VerificationLoop engagement-scoped budget stub — `backend/verification/verification_loop.py` — Validated in Phase 2: Security Hardening (scoping-only; full classification logic deferred to v1.1 Phase 5)
 - ✓ React frontend operator UI (App.jsx — single-file monolith) — `frontend/`
 
 ### Active
@@ -37,10 +39,10 @@ A solo operator can run a complete structured pentest engagement — from scopin
 **Milestone 1 — Critical Bug Fixes & Dead Code Removal**
 - [x] Delete old backend system (`backend/main.py`, `backend/core/`, `backend/agents/`) and migrate tests that import from them — Validated in Phase 1: Cleanup & Configuration
 - [x] Fix model string: `claude_model` is now `"claude-sonnet-4-6"` — Validated in Phase 1: Cleanup & Configuration
-- [ ] Docker sandbox for generated tool execution (replace `asyncio.create_subprocess_exec` host subprocess — RCE risk)
-- [ ] SQLite WAL mode on every connection (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`)
-- [ ] Per-engagement Kali working directories (`/engagements/{engagement_id}/` on SSH host)
-- [ ] VerificationLoop `_request_counts` scoped by `engagement_id` (currently instance-level, cross-contaminates findings)
+- [x] Docker sandbox for generated tool execution — Validated in Phase 2: Security Hardening
+- [x] SQLite WAL mode on every connection — Validated in Phase 2: Security Hardening
+- [x] Per-engagement Kali working directories — Validated in Phase 2: Security Hardening
+- [x] VerificationLoop `_request_counts` scoped by `engagement_id` — minimal stub built in Phase 2 (full CONFIRMED/FALSE_POSITIVE/MANUAL_REVIEW logic deferred to v1.1 Phase 5)
 
 **Milestone 2 — Orchestration Upgrade**
 - [ ] PHASE_FAILED event propagation through the agent loop
@@ -67,7 +69,9 @@ A solo operator can run a complete structured pentest engagement — from scopin
 
 **Model config:** `claude_model = "claude-sonnet-4-6"` — Claude API calls now succeed. Human verification of live API (no Ollama fallback) is pending (tracked in 01-HUMAN-UAT.md).
 
-**Security risk:** Tool execution sandbox is `asyncio.create_subprocess_exec("python3", ...)` running generated code directly on the host process. Docker isolation is required before using this against real targets.
+**Security risk (resolved Phase 2):** Tool execution sandbox previously used `asyncio.create_subprocess_exec("python3", ...)` running generated code directly on the host process. Now runs in an isolated Docker container (DooD). Still unwired — zero live callers until v1.1 Phase 9.
+
+**Correction (2026-08-29, during v1.1 milestone gap analysis):** The "Validated" bullets for `ReportGenerator`/`ResearchKB`+`ResearchDaemon` were inaccurate — code exists on disk (`backend/reporting/intelligent_reporter.py`, `backend/intelligence/research_daemon.py`, `backend/intelligence/research_kb.py`) but neither is imported anywhere in the live orchestrator/api/app path. Same is true of `intel_bus.py`, `dark_web_intel.py`, `source_adapters.py`, `client_profile.py`, `custom_tool_generator.py`, and `compliance_mapping.py` — all orphaned. Removed from Validated; wiring these up is v1.1 milestone scope (see planned Phases 7–10: Semantic Memory & Client Profiles, Threat Intel & Attribution, Auto Research & Strategy Evolution, Report Mode Suite).
 
 **LLM stack:** Claude (Anthropic SDK) + Ollama/Mistral fallback. Mentor recommendation: switch orchestration to DeepSeek-V3, Qwen 7B for compaction. Retain Claude for specific analysis tasks.
 
@@ -86,10 +90,11 @@ A solo operator can run a complete structured pentest engagement — from scopin
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | New `backend/agent/` system is canonical; old `backend/core/` is dead | Dual systems cause import confusion and test failures | ✓ Completed — Phase 1 |
-| Docker sandbox for tool execution, not subprocess | Generated code on host = RCE risk during real engagements | — Pending |
-| WAL mode for all SQLite connections | Concurrent reads/writes during active engagement need non-blocking I/O | — Pending |
+| Docker sandbox for tool execution, not subprocess | Generated code on host = RCE risk during real engagements | ✓ Good — Phase 2 |
+| WAL mode for all SQLite connections | Concurrent reads/writes during active engagement need non-blocking I/O | ✓ Good — Phase 2 |
 | DeepSeek-V3 for orchestration (future) | Better performance/cost ratio for long-context pentest reasoning vs Claude | — Pending |
-| Per-engagement Kali workdirs | Commands from different sessions must not bleed into same filesystem state | — Pending |
+| Per-engagement Kali workdirs | Commands from different sessions must not bleed into same filesystem state | ✓ Good — Phase 2 (component-level; orchestrator still doesn't call sub-agents, pre-existing gap outside Phase 2 scope) |
+| Docker-outside-of-Docker (DooD) for sandbox isolation | Smaller change than a host-level sidecar process; backend container gains host Docker access as a tradeoff, accepted given single-operator use and zero live callers this phase | ✓ Good — Phase 2 (D-10) |
 | Frontend component split after backend stabilizes | App.jsx monolith acceptable until backend is correct; don't split before foundation is solid | — Pending |
 
 ## Evolution
@@ -110,4 +115,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-12 after Phase 1: Cleanup & Configuration*
+*Last updated: 2026-08-29 after Phase 2: Security Hardening*
