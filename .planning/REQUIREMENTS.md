@@ -12,13 +12,13 @@
 
 ### SEC — Security & Execution Isolation
 
-- [ ] **SEC-01**: Generated tool code executes inside a Docker container (`--network=none --memory=256m --rm`) — no host subprocess execution of untrusted code
-- [ ] **SEC-02**: Each engagement's Kali SSH commands run inside `/engagements/{engagement_id}/` working directory, isolating filesystem state between engagements
+- [x] **SEC-01**: Generated tool code executes inside a Docker container (`--network=none --memory=256m --rm`) — no host subprocess execution of untrusted code
+- [x] **SEC-02**: Each engagement's Kali SSH commands run inside `/engagements/{engagement_id}/` working directory, isolating filesystem state between engagements
 
 ### DATA — Persistence & Engagement Scoping
 
-- [ ] **DATA-01**: Every SQLite connection opened in the application applies `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;` immediately after connection
-- [ ] **DATA-02**: `VerificationLoop._request_counts` dictionary keys are prefixed with `{engagement_id}:` so finding counts do not bleed across concurrent engagements
+- [x] **DATA-01**: Every SQLite connection opened in the application applies `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;` immediately after connection
+- [x] **DATA-02**: `VerificationLoop._request_counts` dictionary keys are prefixed with `{engagement_id}:` so finding counts do not bleed across concurrent engagements
 
 ### ORCH — Orchestration Upgrade
 
@@ -64,10 +64,10 @@
 |-------------|-------|--------|
 | CLEAN-01 | Phase 1 — Cleanup & Configuration | Complete |
 | CLEAN-02 | Phase 1 — Cleanup & Configuration | Complete |
-| SEC-01 | Phase 2 — Security Hardening | Pending |
-| SEC-02 | Phase 2 — Security Hardening | Pending |
-| DATA-01 | Phase 2 — Security Hardening | Pending |
-| DATA-02 | Phase 2 — Security Hardening | Pending |
+| SEC-01 | Phase 2 — Security Hardening | Complete |
+| SEC-02 | Phase 2 — Security Hardening | Complete |
+| DATA-01 | Phase 2 — Security Hardening | Complete |
+| DATA-02 | Phase 2 — Security Hardening | Complete |
 | ORCH-01 | Phase 3 — Orchestration Upgrade | Pending |
 | ORCH-02 | Phase 3 — Orchestration Upgrade | Pending |
 | ORCH-03 | Phase 3 — Orchestration Upgrade | Pending |
