@@ -1,28 +1,50 @@
 """SandboxOnDemand backend — ephemeral container for tool validation (Section 6.2).
 
 Provides sandbox execution capabilities for custom tool validation
-against DVWA. Executes tool code in isolated subprocess with timeout.
+against DVWA. Executes tool code inside an isolated Docker container
+(--network=none --memory=256m, auto-removed after use) via docker-py,
+wrapped in asyncio.to_thread since the SDK is synchronous (SEC-01).
+
+NOTE (RESEARCH.md Pitfall #3, forward-looking for v1.1 Phase 9): running
+with network_mode="none" blocks reachability to `dvwa_url`
+("http://sandbox:80" by default) from inside the sandbox container.
+Validating generated tools against a live DVWA target therefore does not
+work yet once this backend is wired up to a live caller — resolving that
+tension (e.g. a dedicated sandbox+DVWA-only network) is out of scope for
+this phase (D-02: this backend has zero live callers this phase).
 """
 
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import tarfile
 import tempfile
 from pathlib import Path
 from typing import Any
+
+import docker
+from docker.errors import APIError, ContainerError, ImageNotFound
 
 logger = logging.getLogger(__name__)
 
 SANDBOX_TIMEOUT = 120  # Maximum execution time in seconds
 
+# Minimal stdlib-only base image (RESEARCH.md Open Question #2). v1.1 Phase 9
+# may swap this for a custom image pre-loaded with common libraries once real
+# generated-tool code samples exist to inform what needs to be baked in.
+SANDBOX_IMAGE = "python:3.12-slim"
+
 
 class SandboxOnDemandBackend:
     """Sandbox backend for custom tool validation against DVWA.
 
-    Executes generated tool code in an isolated subprocess with:
-      - Timeout enforcement (max 120s)
+    Executes generated tool code inside an isolated Docker container with:
+      - --network=none (no network access) and --memory=256m memory cap
+      - Timeout enforcement (max 120s), container killed+removed on timeout
       - Output capture for effectiveness scoring
+      - Ephemeral container removal after every run (no leaked containers)
       - Temporary file cleanup after execution
     """
 
@@ -51,7 +73,7 @@ class SandboxOnDemandBackend:
         target: str = "http://sandbox:80",
         timeout: int = SANDBOX_TIMEOUT,
     ) -> dict[str, Any]:
-        """Execute tool code in a subprocess with timeout.
+        """Execute tool code inside an isolated Docker container with timeout.
 
         Args:
             code: Python source code to execute.
@@ -68,34 +90,33 @@ class SandboxOnDemandBackend:
         script_path.write_text(code)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "python3", str(script_path), target,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(tmp_dir),
-            )
-
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout,
+                exit_code, stdout_str, stderr_str = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._run_sync, code, tool_name, target, timeout,
+                    ),
+                    timeout=timeout + 5,  # outer guard slightly longer than inner container.wait timeout
                 )
-                stdout_str = stdout.decode("utf-8", errors="replace")
-                stderr_str = stderr.decode("utf-8", errors="replace")
 
                 return {
-                    "status": "success" if proc.returncode == 0 else "error",
+                    "status": "success" if exit_code == 0 else "error",
                     "tool": tool_name,
                     "stdout": stdout_str,
                     "stderr": stderr_str,
-                    "exit_code": proc.returncode,
-                    "passed": proc.returncode == 0,
+                    "exit_code": exit_code,
+                    "passed": exit_code == 0,
                     "effectiveness_score": self._compute_effectiveness(stdout_str),
                     "findings_produced": self._count_findings(stdout_str),
                     "output": stdout_str[:1000],
                 }
 
-            except asyncio.TimeoutError:
-                proc.kill()
+            except TimeoutError:
+                # asyncio.TimeoutError IS builtins.TimeoutError on Python 3.11+,
+                # so this catches both: (a) _run_sync's own container.wait()
+                # read-timeout (re-raised as TimeoutError, container already
+                # killed+removed inside _run_sync's finally), and (b) the
+                # outer asyncio.wait_for guard firing if the thread itself
+                # hangs beyond timeout+5.
                 return {
                     "status": "timeout",
                     "tool": tool_name,
@@ -103,6 +124,15 @@ class SandboxOnDemandBackend:
                     "passed": False,
                     "effectiveness_score": 0.0,
                 }
+
+        except (ImageNotFound, APIError, ContainerError) as exc:
+            return {
+                "status": "error",
+                "tool": tool_name,
+                "error": str(exc),
+                "passed": False,
+                "effectiveness_score": 0.0,
+            }
 
         except Exception as exc:
             return {
@@ -119,6 +149,83 @@ class SandboxOnDemandBackend:
                 script_path.unlink(missing_ok=True)
                 tmp_dir.rmdir()
             except OSError:
+                pass
+
+    @staticmethod
+    def _build_script_tar(tool_name: str, code: str) -> bytes:
+        """Tar up the script as `/work/<tool_name>.py`, in-memory (no disk I/O).
+
+        Injected into the container via `put_archive()` rather than a bind
+        mount: the backend itself runs inside a container (DooD, D-10), and
+        `client.containers.run(..., volumes={host_path: ...})` resolves
+        `host_path` against the Docker *daemon's* host filesystem, not the
+        caller's own container filesystem — a plain tempfile path created
+        inside the backend container is invisible to the daemon and silently
+        mounts an empty directory. `put_archive()` streams file bytes
+        directly over the Docker Engine API and has no such path-mapping
+        problem.
+        """
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            data = code.encode("utf-8")
+            info = tarfile.TarInfo(name=f"work/{tool_name}.py")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
+
+    @staticmethod
+    def _run_sync(
+        code: str, tool_name: str, target: str, timeout: int,
+    ) -> tuple[int, str, str]:
+        """Blocking docker-py container run — call via asyncio.to_thread.
+
+        Uses remove=False + explicit container.remove(force=True) in a
+        finally block rather than auto_remove=True, since auto_remove races
+        client-side log reads for fast-exiting scripts (docker/docker-py
+        issues #1813, #3289 — RESEARCH.md Pitfall #2).
+
+        container.wait(timeout=N) is a client-side read timeout on the
+        wait-for-exit HTTP call, not a guarantee the container itself is
+        killed (RESEARCH.md Assumption A3) — on that read-timeout we
+        explicitly kill the container here (we hold the direct reference,
+        no ancestor-filter guessing needed) and re-raise as TimeoutError so
+        the caller can report status="timeout".
+        """
+        client = docker.from_env()
+        container = client.containers.create(
+            SANDBOX_IMAGE,
+            command=["python3", f"/work/{tool_name}.py", target],
+            network_mode="none",
+            mem_limit="256m",
+        )
+        try:
+            tar_bytes = SandboxOnDemandBackend._build_script_tar(tool_name, code)
+            container.put_archive("/", tar_bytes)
+            container.start()
+
+            try:
+                result = container.wait(timeout=timeout)
+            except Exception as wait_exc:
+                try:
+                    container.kill()
+                except APIError:
+                    pass
+                raise TimeoutError(
+                    f"container wait timed out after {timeout}s",
+                ) from wait_exc
+
+            exit_code = result.get("StatusCode", -1)
+            stdout_str = container.logs(stdout=True, stderr=False).decode(
+                "utf-8", errors="replace",
+            )
+            stderr_str = container.logs(stdout=False, stderr=True).decode(
+                "utf-8", errors="replace",
+            )
+            return exit_code, stdout_str, stderr_str
+        finally:
+            try:
+                container.remove(force=True)
+            except APIError:
                 pass
 
     @staticmethod
