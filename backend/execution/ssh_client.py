@@ -1,3 +1,4 @@
+import asyncio
 import paramiko
 import logging
 from typing import Optional
@@ -16,19 +17,20 @@ class SSHClient:
             self.client = paramiko.SSHClient()
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
-            await self.client.connect(
+            await asyncio.to_thread(
+                self.client.connect,
                 hostname=config.settings.kali_host,
                 port=config.settings.kali_port,
                 username=config.settings.kali_user,
                 password=config.settings.kali_password,
             )
-        
+
         return self.client
 
     async def execute(self, command: str) -> str:
         client = await self.connect()
-        
-        stdin, stdout, stderr = client.exec_command(command)
+
+        stdin, stdout, stderr = await asyncio.to_thread(client.exec_command, command)
         
         output = stdout.read().decode()
         error = stderr.read().decode()
