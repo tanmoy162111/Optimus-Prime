@@ -68,7 +68,16 @@
   2. `LLMRouter` supports task-based routing across multiple configured providers (Claude, Ollama, and at least one additional API provider such as DeepSeek); a successful chat message's logs show which provider handled orchestration vs. compaction — Claude remains a fully supported, non-removed provider (exact provider-per-task mix is an operator/CONTEXT.md decision, not a fixed swap)
   3. An OmX planning request produces a logged 8-directive DAG and the OmO coordinator log shows it consuming that plan — the two components are traceable as separate concerns in logs
   4. After a deliberate backend process restart mid-engagement, the operator can reconnect with the same session ID and the conversation history, scope, and phase status are restored from disk
-**Plans:** TBD
+**Plans:** 9 plans (4 waves)
+- [ ] 03-01-PLAN.md — Foundation defect fixes: config fields + SmartMemory/ConversationSummariser stubs (ORCH-02 prereq)
+- [ ] 03-02-PLAN.md — LLMRouter multi-provider routing: compaction→Qwen, optional DeepSeek (ORCH-02)
+- [ ] 03-03-PLAN.md — SQLite+WAL SessionStore persistence + EngagementSession serialization (PERSIST-01)
+- [ ] 03-04-PLAN.md — TaskRegistry directive handoff store + restart crash-detection (PERSIST-01)
+- [ ] 03-05-PLAN.md — clawhip typed-event router (WS + XAI audit trail) (ORCH-01)
+- [ ] 03-06-PLAN.md — OmX planner: forced-tool-use DAG generation + validation retry (ORCH-03)
+- [ ] 03-07-PLAN.md — InstructionParser reconciliation: dedupe EngineRouter, EngagementSession signature (ORCH-03/D-02)
+- [ ] 03-08-PLAN.md — OmO coordinator: sequential dispatch, scope/plan gates, PHASE_FAILED emission (ORCH-01/ORCH-03)
+- [ ] 03-09-PLAN.md — Orchestrator wiring: OmX→OmO→ResponseComposer pipeline (ORCH-01/ORCH-03)
 **UI hint**: no
 
 ### Phase 4: Frontend Split

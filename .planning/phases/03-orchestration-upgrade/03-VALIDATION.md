@@ -2,7 +2,7 @@
 phase: 3
 slug: orchestration-upgrade
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-09-01
 ---
@@ -38,16 +38,16 @@ created: 2026-09-01
 
 | Task ID | Plan | Wave | Requirement | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | ORCH-01 | `PHASE_FAILED` event reaches `ConnectionManager.send()` when a directive's `agent.execute()` raises | integration | `pytest tests/agent/test_omo.py::test_directive_failure_emits_phase_failed -x` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | TBD | ORCH-01 | `session.state.phase_status[directive.id]` transitions to `"failed"` on exception | unit | `pytest tests/agent/test_omo.py::test_phase_status_set_to_failed_on_exception -x` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | TBD | ORCH-02 | `LLMRouter.complete(mode="compaction")` resolves to Ollama/Qwen, never Claude | unit | `pytest tests/agent/test_llm_router.py::test_compaction_mode_routes_to_ollama -x` | ❌ Wave 0 (extends existing file) | ⬜ pending |
-| TBD | TBD | TBD | ORCH-02 | `LLMRouter.complete(mode="orchestration")` still resolves to Claude (regression guard) | unit | `pytest tests/agent/test_llm_router.py -x` | ✅ existing | ⬜ pending |
-| TBD | TBD | TBD | ORCH-03 | `OmX.plan()` returns a valid `EngagementPlan` for a canonical `$pentest`-style directive | unit | `pytest tests/agent/test_omx.py::test_plan_generates_valid_dag -x` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | TBD | ORCH-03 | A hallucinated agent name in a `Directive` fails registry validation before any `agent.execute()` call | unit | `pytest tests/agent/test_omo.py::test_unregistered_agent_blocks_dispatch -x` | ❌ Wave 0 | ⬜ pending |
-| TBD | TBD | TBD | PERSIST-01 | `SessionStore` reload after a simulated restart reconstructs `phase_status`/findings matching last commit | integration | `pytest tests/session/test_session_store.py::test_resolve_after_restart_reconstructs_state -x` | ❌ Wave 0 (extends existing file) | ⬜ pending |
-| TBD | TBD | TBD | PERSIST-01 | `TaskRegistry` rows with `status='running'` after restart are detected and surfaced | integration | `pytest tests/agent/test_task_registry.py::test_running_row_detected_after_restart -x` | ❌ Wave 0 | ⬜ pending |
+| T2 | 03-08 | 3 | ORCH-01 | `PHASE_FAILED` event reaches `ConnectionManager.send()` when a directive's `agent.execute()` raises | integration | `pytest tests/agent/test_omo.py::test_directive_failure_emits_phase_failed -x` | ❌ Wave 0 | ⬜ pending |
+| T2 | 03-08 | 3 | ORCH-01 | `session.state.phase_status[directive.id]` transitions to `"failed"` on exception | unit | `pytest tests/agent/test_omo.py::test_phase_status_set_to_failed_on_exception -x` | ❌ Wave 0 | ⬜ pending |
+| T1 | 03-02 | 2 | ORCH-02 | `LLMRouter.complete(mode="compaction")` resolves to Ollama/Qwen, never Claude | unit | `pytest tests/agent/test_llm_router.py::test_compaction_mode_routes_to_ollama -x` | ❌ Wave 0 (extends existing file) | ⬜ pending |
+| T1 | 03-02 | 2 | ORCH-02 | `LLMRouter.complete(mode="orchestration")` still resolves to Claude (regression guard) | unit | `pytest tests/agent/test_llm_router.py -x` | ✅ existing | ⬜ pending |
+| T2 | 03-06 | 1 | ORCH-03 | `OmX.plan()` returns a valid `EngagementPlan` for a canonical `$pentest`-style directive | unit | `pytest tests/agent/test_omx.py::test_plan_generates_valid_dag -x` | ❌ Wave 0 | ⬜ pending |
+| T1 | 03-08 | 3 | ORCH-03 | A hallucinated agent name in a `Directive` fails registry validation before any `agent.execute()` call | unit | `pytest tests/agent/test_omo.py::test_unregistered_agent_blocks_dispatch -x` | ❌ Wave 0 | ⬜ pending |
+| T2 | 03-03 | 1 | PERSIST-01 | `SessionStore` reload after a simulated restart reconstructs `phase_status`/findings matching last commit | integration | `pytest tests/session/test_session_store.py::test_resolve_after_restart_reconstructs_state -x` | ❌ Wave 0 (extends existing file) | ⬜ pending |
+| T2 | 03-04 | 2 | PERSIST-01 | `TaskRegistry` rows with `status='running'` after restart are detected and surfaced | integration | `pytest tests/agent/test_task_registry.py::test_running_row_detected_after_restart -x` | ❌ Wave 0 | ⬜ pending |
 
-*Task ID / Plan / Wave columns populated by the planner as plans are created.*
+*Task ID / Plan / Wave columns populated by the planner (2026-09-01). Task IDs are per-plan (T1/T2 = task order within the named plan).*
 
 ---
 
