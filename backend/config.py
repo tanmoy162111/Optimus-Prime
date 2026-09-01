@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     kali_port: int = 22
     kali_user: str = "kali"
     kali_password: str = ""
+    summariser_threshold: int = 60000
+    qwen_model: str = "qwen2.5:7b"
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
