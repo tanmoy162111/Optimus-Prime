@@ -20,7 +20,9 @@ the depends_on/gate_required fields it emits per directive.
 import logging
 from typing import List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+
+from backend import config
 
 logger = logging.getLogger(__name__)
 
@@ -122,3 +124,71 @@ Example emit_engagement_plan input for "$pentest acme.com" (approved target: acm
   "rationale": "Full pentest decomposition: scope discovery gated for approval, recon/intel/scan/cloud in parallel-eligible phases, exploit gated on verification completing recon+scan+cloud, verify before report."
 }
 """
+
+
+class OmX:
+    """Workflow planner — decomposes an operator directive into an EngagementPlan DAG."""
+
+    def __init__(self, llm_router):
+        self.llm_router = llm_router
+        # Derive the tool's input_schema directly from EngagementPlan so it can
+        # never drift from the Pydantic validator applied to the response.
+        self._plan_tool = {
+            "name": "emit_engagement_plan",
+            "description": "Return the decomposed engagement DAG for the operator's directive.",
+            "input_schema": EngagementPlan.model_json_schema(),
+        }
+
+    async def plan(self, directive_text: str, session) -> EngagementPlan:
+        scope = session.scope
+        scope_context = (
+            f"Approved targets: {scope.targets}\n"
+            f"Excluded targets: {scope.exclusions}\n"
+            f"Stealth level: {scope.stealth_level}\n"
+            f"Approved ports: {scope.ports}\n"
+            f"Approved protocols: {scope.protocols}"
+        )
+        messages = [
+            {"role": "user", "content": f"{scope_context}\n\nOperator directive: {directive_text}"}
+        ]
+
+        last_error = None
+        for attempt in range(1, 4):  # 1 initial + 2 retries = 3 attempts total
+            response = await self.llm_router.claude.messages.create(
+                model=config.settings.claude_model,
+                max_tokens=2048,
+                system=_OMX_PLANNING_SYSTEM_PROMPT,
+                messages=messages,
+                tools=[self._plan_tool],
+                tool_choice={
+                    "type": "tool",
+                    "name": "emit_engagement_plan",
+                    "disable_parallel_tool_use": True,
+                },
+            )
+            tool_use = next(b for b in response.content if b.type == "tool_use")
+
+            if getattr(response, "stop_reason", None) == "max_tokens":
+                last_error = "response truncated at max_tokens before a complete plan was emitted"
+                logger.warning(f"OmX plan validation failed (attempt {attempt}/3): {last_error}")
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": f"Your plan failed validation: {last_error}. Return a corrected plan.",
+                })
+                continue
+
+            try:
+                return EngagementPlan.model_validate(tool_use.input)
+            except ValidationError as e:
+                last_error = e
+                logger.warning(f"OmX plan validation failed (attempt {attempt}/3): {e}")
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": f"Your plan failed validation: {e}. Return a corrected plan.",
+                })
+
+        raise OmXPlanValidationError(
+            f"OmX could not produce a valid EngagementPlan after 3 attempts: {last_error}"
+        )
