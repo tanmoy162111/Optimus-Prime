@@ -182,4 +182,130 @@ class OmO:
         # directive 1 ever dispatches (Critical Failure Mode #3).
         validate_plan(plan, active_agents, session.scope)
 
-        # The sequential dispatch loop itself is implemented in Task 2.
+        # D-08: strictly sequential — one await per directive in DAG order,
+        # no concurrent/batched dispatch primitives. The DAG is already
+        # topologically ordered by OmX; OmO does not reorder it.
+        for directive in plan.directives:
+            unmet = [
+                dep
+                for dep in directive.depends_on
+                if session.state.phase_status.get(dep) != "completed"
+            ]
+            if unmet:
+                logger.warning(
+                    "Directive %s skipped: unmet dependencies %s",
+                    directive.id, unmet,
+                )
+                continue
+
+            if directive.gate_required:
+                await self._gate_pending(session, directive)
+                continue
+
+            await self._dispatch_directive(session, directive, active_agents)
+
+    async def _gate_pending(self, session: Any, directive: Directive) -> None:
+        """Terminal gate boundary (D-08 phase-3 scope boundary).
+
+        A `gate_required=True` directive can never be cleared mid-dispatch
+        this phase (OmO.dispatch() runs synchronously within a single
+        process_stream() call — there is no interruption point for operator
+        input). This fails closed: never blocks/polls/loops waiting for a
+        clearance that cannot arrive.
+        """
+        session.state.set_phase_status(directive.id, "gate_pending")
+        await self.task_registry.mark(
+            session.session_id,
+            directive.id,
+            directive.agent,
+            "failed",
+            error_detail="gate_required, manual re-issue needed",
+        )
+        await self.clawhip.emit(
+            session.session_id,
+            ClawhipEvent(
+                event_type=ClawhipEventType.GATE_PENDING,
+                directive_id=directive.id,
+                detail=(
+                    "Directive requires operator gate approval; mid-dispatch "
+                    "approval is out of scope for phase 3 — re-issue after review"
+                ),
+            ),
+        )
+
+    async def _dispatch_directive(
+        self, session: Any, directive: Directive, active_agents: Dict[str, Any]
+    ) -> None:
+        agent = active_agents[directive.agent]
+
+        await self.task_registry.mark(
+            session.session_id, directive.id, directive.agent, "running"
+        )
+        session.state.set_phase_status(directive.id, "running")
+        await self.clawhip.emit(
+            session.session_id,
+            ClawhipEvent(
+                event_type=ClawhipEventType.PHASE_STARTED, directive_id=directive.id
+            ),
+        )
+
+        try:
+            # directive.tools passed straight through — no ToolSelector
+            # re-selection over data OmX already produced (D-02a).
+            result = await asyncio.wait_for(
+                agent.execute(directive.target, tools=directive.tools),
+                timeout=self.directive_timeout,
+            )
+        except asyncio.TimeoutError:
+            await self._fail_directive(
+                session, directive, f"timed out after {self.directive_timeout}s"
+            )
+            return
+        except Exception as e:
+            # Whole directive is the failure unit (D-07) — never a bare
+            # except/pass; always log + emit PHASE_FAILED.
+            await self._fail_directive(session, directive, str(e))
+            return
+
+        session.state.set_phase_status(directive.id, "completed")
+        session.state.add_finding(result)
+        await self.task_registry.mark(
+            session.session_id, directive.id, directive.agent, "completed"
+        )
+        await self.clawhip.emit(
+            session.session_id,
+            ClawhipEvent(
+                event_type=ClawhipEventType.PHASE_COMPLETED, directive_id=directive.id
+            ),
+        )
+
+        if self.architect is not None:
+            try:
+                await self.architect.enrich_directive(directive)
+            except Exception as exc:
+                # Architect enrichment (D-10 minimal stub) is call-safe by
+                # design — it must never break a directive's own success path.
+                logger.warning(
+                    "Architect enrichment failed for directive %s: %s",
+                    directive.id, exc,
+                )
+
+    async def _fail_directive(self, session: Any, directive: Directive, error: str) -> None:
+        session.state.set_phase_status(directive.id, "failed")
+        await self.task_registry.mark(
+            session.session_id,
+            directive.id,
+            directive.agent,
+            "failed",
+            error_detail=error,
+        )
+        logger.error("Directive %s failed: %s", directive.id, error)
+        await self.clawhip.emit(
+            session.session_id,
+            ClawhipEvent(
+                event_type=ClawhipEventType.PHASE_FAILED,
+                directive_id=directive.id,
+                detail=f"Directive {directive.id} failed",
+                error=error,
+            ),
+        )
