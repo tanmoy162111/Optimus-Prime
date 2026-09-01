@@ -443,17 +443,19 @@ async def resolve(self, session_id: str) -> Optional[EngagementSession]:
 
 **If this table is empty:** N/A — see above; all three assumptions are implementation-default choices flagged for confirmation, not claims about what the codebase currently does (which were all verified via grep/direct read, not assumed).
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `TaskRegistry` writes and `EngagementState.phase_status`/`SessionStore` writes share a single SQL transaction, or just a single connection?**
    - What we know: Pattern 2 recommends the same SQLite connection for both `SessionStore` and `TaskRegistry` for consistency reasons.
    - What's unclear: whether the planner should go further and wrap each directive's `TaskRegistry` status update + `phase_status` persistence in one `BEGIN...COMMIT` block (true atomicity) or treat "same connection, sequential writes" as sufficient given this is a single-operator, low-concurrency system where the crash window between two sequential `execute()`+`commit()` calls is narrow but not zero.
    - Recommendation: default to sequential same-connection writes (simpler, matches existing `ClientProfileDB` patterns which don't use explicit multi-statement transactions either) unless the plan-checker or eval-auditor flags PERSIST-01's "trustworthy resume" bar as requiring true transactional atomicity — this is a complexity/correctness tradeoff worth a `checkpoint:human-verify` if the planner is unsure, not a default to silently pick.
+   - **RESOLVED:** `03-04-PLAN.md`'s threat model (T-03-05c) adopted the recommendation — same-connection sequential writes, no explicit multi-statement transaction wrapper.
 
 2. **Does `ResponseComposer.compose()`'s existing signature (`decision: Dict`, `findings: List[Dict]`, `session_state: Dict`) need to change to accept the new `EngagementPlan`/directive-result shape, or can OmO's dispatch results be adapted to fit the existing dict shape?**
    - What we know: `ResponseComposer.compose()` already exists and is unused (constructed but never called, per CONTEXT.md's wiring-gap finding) — its current signature expects a single `decision` dict with `intent`/`engine`/`target`/`phase`/`tools` keys, which maps naturally to a *single* `InstructionParser.parse()` result, not a multi-directive `EngagementPlan`.
    - What's unclear: whether Pattern 4's wiring should call `compose()` once per completed directive (looping, concatenating output) or once at the end summarizing the whole plan — AI-SPEC.md's Core Pattern (Section 4) says "response composition... turns the completed/failed directive results into the operator-facing chat reply" (singular reply, implying once-at-the-end), but doesn't specify whether `ResponseComposer.compose()`'s signature itself needs a new multi-directive variant method or should be called in a loop.
    - Recommendation: this is a genuine implementation-shape decision the planner should resolve during task breakdown — likely add a new `compose_plan_summary(plan, session)` method to `ResponseComposer` rather than forcing `compose()`'s existing single-decision signature to awkwardly represent a multi-directive DAG result.
+   - **RESOLVED:** `03-09-PLAN.md` Task 2 adopted the recommendation verbatim — added `compose_plan_summary(plan, session)` as a new method rather than forcing the existing single-decision `compose()` signature.
 
 ## Environment Availability
 
