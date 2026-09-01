@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -61,4 +63,36 @@ class EngagementSession:
             state=EngagementState(),
             created_at=now,
             last_active=now,
+        )
+
+    def to_row(self) -> str:
+        """Serialize this session to a JSON string for SQLite persistence.
+
+        `default=str` handles the datetime fields (created_at/last_active),
+        which `dataclasses.asdict()` leaves as `datetime` instances — a naive
+        `json.dumps(asdict(session))` raises TypeError without it.
+        """
+        return json.dumps(dataclasses.asdict(self), default=str)
+
+    @classmethod
+    def from_row(cls, payload: str) -> "EngagementSession":
+        """Reconstruct an EngagementSession from a to_row() payload.
+
+        Explicitly rebuilds the nested dataclasses (ScopeConfig,
+        ConversationHistory, EngagementState) rather than assuming a plain
+        dict round-trips back into dataclass instances automatically.
+        """
+        d = json.loads(payload)
+        return cls(
+            session_id=d["session_id"],
+            engagement_id=d["engagement_id"],
+            scope=ScopeConfig(**d["scope"]),
+            conv_history=ConversationHistory(messages=d["conv_history"]["messages"]),
+            state=EngagementState(
+                phase_status=d["state"]["phase_status"],
+                findings=d["state"]["findings"],
+                gate_queue=d["state"]["gate_queue"],
+            ),
+            created_at=datetime.fromisoformat(d["created_at"]),
+            last_active=datetime.fromisoformat(d["last_active"]),
         )
