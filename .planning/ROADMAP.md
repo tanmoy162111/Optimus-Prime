@@ -21,7 +21,7 @@
 |---|-------|------|--------------|-------|
 | 1 | Cleanup & Configuration | 4/4 | Complete   | 2026-05-12 |
 | 2 | Security Hardening | 4/4 | Complete   | 2026-08-29 |
-| 3 | Orchestration Upgrade | 5/9 | In Progress|  |
+| 3 | Orchestration Upgrade | 7/9 | In Progress|  |
 | 4 | Frontend Split | UI componentized, orphaned component wired, session state centralized | UI-01, UI-02, UI-03 | TBD |
 
 ---
@@ -68,11 +68,11 @@
   2. `LLMRouter` supports task-based routing across multiple configured providers (Claude, Ollama, and at least one additional API provider such as DeepSeek); a successful chat message's logs show which provider handled orchestration vs. compaction — Claude remains a fully supported, non-removed provider (exact provider-per-task mix is an operator/CONTEXT.md decision, not a fixed swap)
   3. An OmX planning request produces a logged 8-directive DAG and the OmO coordinator log shows it consuming that plan — the two components are traceable as separate concerns in logs
   4. After a deliberate backend process restart mid-engagement, the operator can reconnect with the same session ID and the conversation history, scope, and phase status are restored from disk
-**Plans:** 5/9 plans executed
+**Plans:** 7/9 plans executed
 - [x] 03-01-PLAN.md — Foundation defect fixes: config fields + SmartMemory/ConversationSummariser stubs (ORCH-02 prereq)
-- [ ] 03-02-PLAN.md — LLMRouter multi-provider routing: compaction→Qwen, optional DeepSeek (ORCH-02)
+- [x] 03-02-PLAN.md — LLMRouter multi-provider routing: compaction→Qwen, optional DeepSeek (ORCH-02)
 - [x] 03-03-PLAN.md — SQLite+WAL SessionStore persistence + EngagementSession serialization (PERSIST-01)
-- [ ] 03-04-PLAN.md — TaskRegistry directive handoff store + restart crash-detection (PERSIST-01)
+- [x] 03-04-PLAN.md — TaskRegistry directive handoff store + restart crash-detection (PERSIST-01)
 - [x] 03-05-PLAN.md — clawhip typed-event router (WS + XAI audit trail) (ORCH-01)
 - [x] 03-06-PLAN.md — OmX planner: forced-tool-use DAG generation + validation retry (ORCH-03)
 - [x] 03-07-PLAN.md — InstructionParser reconciliation: dedupe EngineRouter, EngagementSession signature (ORCH-03/D-02)
