@@ -2,6 +2,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List
 
+import httpx
+
 from backend import config
 from backend.inference.ollama_client import OllamaClient
 
@@ -30,6 +32,8 @@ class LLMRouter:
     ) -> LLMResponse:
         if mode == "orchestration":
             return await self._claude_complete(messages, system)
+        elif mode == "compaction":
+            return await self._compaction_complete(messages)
         return await self._ollama_complete(messages)
 
     async def _claude_complete(
@@ -63,6 +67,19 @@ class LLMRouter:
         return LLMResponse(
             content=content,
             model_used=config.settings.mistral_model,
+            input_tokens=len(prompt.split()),
+            output_tokens=len(content.split()),
+        )
+
+    async def _compaction_complete(self, messages: List[Dict[str, str]]) -> LLMResponse:
+        prompt = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
+        content = await self.ollama.generate(
+            model=config.settings.qwen_model,
+            prompt=prompt,
+        )
+        return LLMResponse(
+            content=content,
+            model_used=config.settings.qwen_model,
             input_tokens=len(prompt.split()),
             output_tokens=len(content.split()),
         )
