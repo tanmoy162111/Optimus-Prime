@@ -31,12 +31,14 @@ async def chat(
     from backend.agent.orchestrator import Orchestrator
 
     session = (
-        session_store.resolve(request.session_id)
+        await session_store.resolve(request.session_id)
         if request.session_id
         else None
-    ) or session_store.create()
+    )
+    if not session:
+        session = await session_store.create()
 
-    session_store.touch(session.session_id)
+    await session_store.touch(session.session_id)
 
     try:
         orchestrator = Orchestrator()
@@ -60,7 +62,7 @@ async def get_session(
     session_id: str,
     _: str = Depends(verify_token),
 ):
-    session = session_store.resolve(session_id)
+    session = await session_store.resolve(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return {
