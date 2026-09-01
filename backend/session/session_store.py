@@ -9,12 +9,16 @@ resolve() checks memory first, falls back to a disk read only on a cache miss.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
+from backend.agent.task_registry import TaskRegistry
 from backend.session.engagement_session import EngagementSession
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStore:
@@ -23,6 +27,11 @@ class SessionStore:
         self._db_path = db_path or Path("data/sessions/sessions.db")
         self._conn: Optional[sqlite3.Connection] = None
         self._lock = asyncio.Lock()
+        # Public attribute — the single shared TaskRegistry instance (bound to
+        # self._conn during initialize()). Plan 09's Orchestrator reads
+        # `session_store.task_registry`; it never constructs its own
+        # (03-04-PLAN.md handoff note).
+        self.task_registry: Optional[TaskRegistry] = None
 
     async def initialize(self) -> None:
         """Open the SQLite connection and create the sessions table if needed."""
@@ -51,6 +60,11 @@ class SessionStore:
                 """,
             )
             await asyncio.to_thread(self._conn.commit)
+
+            # Single shared TaskRegistry instance bound to this same connection
+            # (03-RESEARCH.md Pattern 2 — not a second sqlite3.connect()/db file).
+            self.task_registry = TaskRegistry(self._conn)
+            await self.task_registry.initialize()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -82,6 +96,23 @@ class SessionStore:
             return None
 
         session = EngagementSession.from_row(row["payload"])
+
+        # Cold-path only (restart recovery) — a cache hit above never reaches
+        # here, so this does not add I/O to the per-message hot path.
+        stale = await self.task_registry.detect_stale(session_id)
+        if stale:
+            for stale_row in stale:
+                logger.error(
+                    "Session %s resume mismatch: directive %s (agent %s) was "
+                    "'running' when the process died — halting further "
+                    "dispatch pending operator review (AI-SPEC Section 6).",
+                    session_id, stale_row["directive_id"], stale_row["agent_name"],
+                )
+        # Surface the stale set on the session itself (not auto-marked
+        # completed) so the caller (OmO/Orchestrator, Plan 08/09) can emit a
+        # PHASE_FAILED-equivalent "unknown outcome" and halt further dispatch.
+        session.stale_directives = [dict(r) for r in stale]
+
         self._sessions[session_id] = session  # repopulate the cache
         return session
 
