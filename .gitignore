@@ -34,4 +34,6 @@ Thumbs.db
 # Data / logs
 data/*.db
 data/*.sqlite
+data/**/*.db
+data/**/*.sqlite
 *.log

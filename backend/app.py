@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api import chat_routes, ws_handler
 from backend.config import settings
+from backend.session.session_store import session_store
 
 
 @asynccontextmanager
@@ -16,11 +17,11 @@ async def lifespan(app: FastAPI):
 
 
 async def startup_event():
-    pass
+    await session_store.initialize()
 
 
 async def shutdown_event():
-    pass
+    await session_store.close()
 
 
 app = FastAPI(

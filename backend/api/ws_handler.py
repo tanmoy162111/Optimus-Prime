@@ -46,9 +46,9 @@ async def websocket_chat(websocket: WebSocket):
 
             if msg_type == "init":
                 raw_id = message.get("session_id")
-                session = (
-                    session_store.resolve(raw_id) if raw_id else None
-                ) or session_store.create()
+                session = await session_store.resolve(raw_id) if raw_id else None
+                if not session:
+                    session = await session_store.create()
                 session_id = session.session_id
                 await manager.connect(session_id, websocket)
                 await websocket.send_json({"type": "session", "session_id": session_id})
@@ -58,12 +58,12 @@ async def websocket_chat(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "Send 'init' first"})
                     continue
 
-                session = session_store.resolve(session_id)
+                session = await session_store.resolve(session_id)
                 if not session:
                     await websocket.send_json({"type": "error", "message": "Session expired"})
                     continue
 
-                session_store.touch(session_id)
+                await session_store.touch(session_id)
                 text = message.get("message", "")
                 mode = message.get("mode")
 
