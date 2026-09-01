@@ -162,6 +162,17 @@ TEST_QUERIES = [
 ]
 
 
+class TestSmartMemoryGetBestToolsStub:
+    """Regression guard for RESEARCH.md Pitfall 2 — get_best_tools() no-op stub."""
+
+    @pytest.mark.asyncio
+    async def test_get_best_tools_returns_empty_list(self, tmp_path):
+        """StrategyEvolutionEngine._enrich_node() calls get_best_tools(); must not raise."""
+        memory = SmartMemory(db_path=str(tmp_path / "memory.db"))
+        result = await memory.get_best_tools("web", top_k=10)
+        assert result == []
+
+
 class TestSmartMemorySemanticSearch:
     """Validate top-3 relevance on all 10 test queries (M3 AC #1)."""
 

@@ -39,3 +39,6 @@ class SmartMemory:
 
     def get_session_memory(self, session_id: str) -> List[MemoryEntry]:
         return [e for e in self.entries if e.session_id == session_id]
+
+    async def get_best_tools(self, target_type: str, top_k: int = 10) -> List[Dict[str, Any]]:
+        return []
