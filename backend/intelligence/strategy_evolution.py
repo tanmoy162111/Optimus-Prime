@@ -65,6 +65,31 @@ class StrategyEvolutionEngine:
         self._kb = research_kb
         self._memory = smart_memory
 
+    async def enrich_directive(self, directive: Any) -> EnrichedAttackChain:
+        """OmO's Architect-role integration point (D-10, Plan 08).
+
+        Wraps a single OmX `Directive` into a one-node `AttackChain` and
+        routes it through the existing `enrich_chain()` pipeline. This is a
+        minimal stub integration per D-10 — it invokes real enrichment logic
+        but never requires it to succeed: OmO's dispatch loop calls this
+        after a directive completes and must never have its own success path
+        broken by a research-intelligence lookup failing or a dependency
+        (ResearchKB/SmartMemory) not being initialized.
+        """
+        node = ChainNode(
+            step_id=directive.id,
+            technique=directive.phase,
+            tool=directive.tools[0] if directive.tools else None,
+        )
+        chain = AttackChain(chain_id=directive.id, nodes=[node], target=directive.target)
+        try:
+            return await self.enrich_chain(chain)
+        except Exception as exc:
+            logger.warning(
+                "Architect enrichment skipped for directive %s: %s", directive.id, exc
+            )
+            return EnrichedAttackChain(chain=chain)
+
     async def enrich_chain(self, chain: AttackChain) -> EnrichedAttackChain:
         """Enrich all nodes in an attack chain with research intelligence."""
         enrichment_count = 0
