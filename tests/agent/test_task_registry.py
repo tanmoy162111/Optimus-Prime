@@ -1,8 +1,10 @@
 """Tests for TaskRegistry (D-10, PERSIST-01).
 
 TaskRegistry shares SessionStore's SQLite connection (03-RESEARCH.md
-Pattern 2) — Task 1 exercises it standalone: table creation, upsert, CHECK
-constraint, asyncio.to_thread wrapping.
+Pattern 2) — these tests exercise it both standalone (Task 1: table
+creation, upsert, CHECK constraint, asyncio.to_thread wrapping) and wired
+into SessionStore's cold-path resolve() (Task 2: public attribute handoff,
+crash-detection on restart).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import sqlite3
 import pytest
 
 from backend.agent.task_registry import TaskRegistry
+from backend.session.session_store import SessionStore
 
 
 @pytest.fixture
@@ -120,3 +123,70 @@ class TestTaskRegistryConstraint:
     async def test_status_check_constraint_rejects_invalid_value(self, registry):
         with pytest.raises(sqlite3.IntegrityError):
             await registry.mark("s1", "d1", "ReconAgent", "not-a-real-status")
+
+
+class TestSessionStoreTaskRegistryHandoff:
+    """Public attribute handoff + crash-detection on restart (Task 2)."""
+
+    async def test_task_registry_is_public_attribute(self, tmp_path):
+        store = SessionStore(db_path=tmp_path / "sessions.db")
+        await store.initialize()
+
+        assert isinstance(store.task_registry, TaskRegistry)
+        assert store.task_registry._conn is store._conn
+
+    async def test_running_row_detected_after_restart(self, tmp_path, caplog):
+        db_path = tmp_path / "sessions.db"
+        store1 = SessionStore(db_path=db_path)
+        session = await store1.create()
+        await store1.task_registry.mark(
+            session.session_id, "d1", "ReconAgent", "running"
+        )
+        await store1.close()
+
+        # Simulated restart: a brand-new SessionStore instance, empty cache,
+        # pointed at the same db_path.
+        store2 = SessionStore(db_path=db_path)
+        with caplog.at_level("ERROR"):
+            resolved = await store2.resolve(session.session_id)
+
+        assert resolved is not None
+        stale = await store2.task_registry.detect_stale(session.session_id)
+        assert len(stale) == 1
+        assert stale[0]["directive_id"] == "d1"
+        assert stale[0]["agent_name"] == "ReconAgent"
+        assert any("d1" in record.message for record in caplog.records)
+
+    async def test_no_stale_rows_resolves_normally(self, tmp_path):
+        db_path = tmp_path / "sessions.db"
+        store1 = SessionStore(db_path=db_path)
+        session = await store1.create()
+        await store1.task_registry.mark(
+            session.session_id, "d1", "ReconAgent", "completed"
+        )
+        await store1.close()
+
+        store2 = SessionStore(db_path=db_path)
+        resolved = await store2.resolve(session.session_id)
+
+        assert resolved is not None
+        stale = await store2.task_registry.detect_stale(session.session_id)
+        assert stale == []
+
+    async def test_hot_path_cache_hit_does_not_call_detect_stale(self, tmp_path, monkeypatch):
+        store = SessionStore(db_path=tmp_path / "sessions.db")
+        session = await store.create()
+
+        calls = []
+        original = store.task_registry.detect_stale
+
+        async def _tracking_detect_stale(session_id):
+            calls.append(session_id)
+            return await original(session_id)
+
+        monkeypatch.setattr(store.task_registry, "detect_stale", _tracking_detect_stale)
+
+        resolved = await store.resolve(session.session_id)
+
+        assert resolved is session
+        assert calls == []
