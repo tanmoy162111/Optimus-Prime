@@ -23,7 +23,7 @@
 ### ORCH — Orchestration Upgrade
 
 - [ ] **ORCH-01**: `PHASE_FAILED` events are propagated through the agent execution loop and surfaced to the operator via the WebSocket event stream
-- [ ] **ORCH-02**: DeepSeek-V3 is configured as the primary orchestration LLM in `LLMRouter`; Qwen 7B handles compaction; Claude retained for specific analysis tasks
+- [ ] **ORCH-02**: `LLMRouter` supports multi-provider task-based routing — Claude remains the orchestration provider (not replaced), Qwen (via Ollama) handles compaction, DeepSeek is wired as an optional additional provider
 - [ ] **ORCH-03**: `OmX` planner implements template-first planning with an 8-directive phase DAG, operating as a separate component from the `OmO` coordinator
 
 ### PERSIST — Session Durability
