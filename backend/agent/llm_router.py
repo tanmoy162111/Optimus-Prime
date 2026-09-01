@@ -34,6 +34,8 @@ class LLMRouter:
             return await self._claude_complete(messages, system)
         elif mode == "compaction":
             return await self._compaction_complete(messages)
+        elif mode == "deepseek":
+            return await self._deepseek_complete(messages)
         return await self._ollama_complete(messages)
 
     async def _claude_complete(
@@ -83,6 +85,38 @@ class LLMRouter:
             input_tokens=len(prompt.split()),
             output_tokens=len(content.split()),
         )
+
+    async def _deepseek_complete(self, messages: List[Dict[str, str]]) -> LLMResponse:
+        if not config.settings.deepseek_api_key:
+            logger.warning(
+                "DeepSeek API key not configured; degrading to Ollama (D-04: absence never breaks orchestration)"
+            )
+            return await self._ollama_complete(messages)
+        try:
+            headers = {
+                "Authorization": f"Bearer {config.settings.deepseek_api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": config.settings.deepseek_model,
+                "messages": messages,
+            }
+            url = f"{config.settings.deepseek_base_url}/chat/completions"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=content,
+                model_used=config.settings.deepseek_model,
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+            )
+        except Exception as e:
+            logger.error(f"DeepSeek error: {e}, falling back to Ollama")
+            return await self._ollama_complete(messages)
 
     async def embed(self, text: str) -> list:
         return await self.ollama.embed(
