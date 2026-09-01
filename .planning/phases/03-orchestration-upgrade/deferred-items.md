@@ -18,3 +18,4 @@ expectation to 403, or configure `HTTPBearer(auto_error=False)` with a custom
 Independently observed and logged by:
 - Plan 03-01 (full-suite verification, Task 1-3 completion check)
 - Plan 03-07 (instruction_parser.py reconciliation)
+- Plan 03-04 (TaskRegistry — full-suite verification, unrelated to task_registry.py/session_store.py)
