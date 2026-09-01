@@ -129,6 +129,16 @@ class ResearchDaemon:
         self._cron.register("nightly_research", "nightly_0200", self.run_nightly)
         self._cron.register("weekly_darkweb", "weekly_sun_0300", self.run_weekly)
 
+    async def deliver_to_clawhip(self, payload: dict[str, Any]) -> None:
+        """Inert delivery-channel stub for clawhip (D-10).
+
+        Minimal integration point so clawhip has somewhere to target research
+        monitoring events without wiring a real listener. No queue, no
+        background thread/task, no external I/O — just a debug log. Full
+        research-daemon wiring is v1.1 Phase 9 scope (Deferred Ideas).
+        """
+        logger.debug("ResearchDaemon: received clawhip delivery (stub, no-op): %s", payload)
+
     @property
     def cron(self) -> CronRegistry:
         return self._cron
