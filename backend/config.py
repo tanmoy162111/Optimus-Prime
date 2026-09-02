@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
     deepseek_base_url: str = "https://api.deepseek.com"
+    models_input_path: str = "/models"
+    ml_results_path: str = "/results"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

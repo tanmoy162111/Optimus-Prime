@@ -1,9 +1,12 @@
+import inspect
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
 from backend.session.engagement_session import EngagementSession
 from backend.agent.llm_router import LLMResponse
 from backend.agent.orchestrator import Orchestrator
+from backend.session.session_store import session_store
 
 
 @pytest.mark.asyncio
@@ -63,3 +66,55 @@ async def test_process_returns_reply_and_session_id():
 
     assert result["reply"] == "ok"
     assert result["session_id"] == session.session_id
+
+
+# ---------------------------------------------------------------------------
+# Task 1: construction — agent registry + OmX + OmO + Clawhip in __init__
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_constructs_with_all_pipeline_collaborators():
+    orchestrator = Orchestrator()
+
+    assert orchestrator.omx is not None
+    assert orchestrator.omo is not None
+    assert orchestrator.clawhip is not None
+    assert orchestrator._agents is not None
+
+
+def test_agent_registry_has_all_11_agents():
+    orchestrator = Orchestrator()
+
+    expected = {
+        "CloudAgent", "DataSecAgent", "EndpointAgent", "ExploitAgent",
+        "GenAIAgent", "IAMAgent", "ICSAgent", "IntelAgent", "ModelSecAgent",
+        "ReconAgent", "ScanAgent",
+    }
+    assert set(orchestrator._agents.keys()) == expected
+    assert len(orchestrator._agents) == 11
+
+
+def test_omo_task_registry_is_the_shared_session_store_instance():
+    orchestrator = Orchestrator()
+
+    assert orchestrator.omo.task_registry is session_store.task_registry
+
+
+def test_orchestrator_does_not_construct_its_own_task_registry():
+    import backend.agent.orchestrator as orchestrator_module
+
+    source = inspect.getsource(orchestrator_module)
+    # Only the import line ("from backend.agent.task_registry import ...")
+    # would reference TaskRegistry — orchestrator.py never imports it and
+    # never calls "TaskRegistry(" to construct one directly.
+    assert "TaskRegistry(" not in source
+
+
+def test_clawhip_constructed_with_manager_and_explainable_ai():
+    from backend.api.ws_handler import manager
+    from backend.reporting.explainable_ai import ExplainableAI
+
+    orchestrator = Orchestrator()
+
+    assert orchestrator.clawhip._manager is manager
+    assert isinstance(orchestrator.clawhip._xai, ExplainableAI)
