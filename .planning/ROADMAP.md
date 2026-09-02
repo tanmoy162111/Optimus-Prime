@@ -10,7 +10,7 @@
 
 - [x] **Phase 1: Cleanup & Configuration** — Remove dead backend system, fix critical model string so the platform actually runs as intended (completed 2026-05-12)
 - [x] **Phase 2: Security Hardening** — Sandbox tool execution, isolate engagement filesystems, scope data correctly, and apply WAL mode (completed 2026-08-29)
-- [ ] **Phase 3: Orchestration Upgrade** — Wire PHASE_FAILED propagation, upgrade LLM stack, implement OmX planner, persist sessions to disk
+- [x] **Phase 3: Orchestration Upgrade** — Wire PHASE_FAILED propagation, upgrade LLM stack, implement OmX planner, persist sessions to disk (completed 2026-09-02)
 - [ ] **Phase 4: Frontend Split** — Wire ChatPane, extract panel components, introduce SessionProvider context
 
 ---
@@ -21,7 +21,7 @@
 |---|-------|------|--------------|-------|
 | 1 | Cleanup & Configuration | 4/4 | Complete   | 2026-05-12 |
 | 2 | Security Hardening | 4/4 | Complete   | 2026-08-29 |
-| 3 | Orchestration Upgrade | 8/9 | In Progress|  |
+| 3 | Orchestration Upgrade | 9/9 | Complete   | 2026-09-02 |
 | 4 | Frontend Split | UI componentized, orphaned component wired, session state centralized | UI-01, UI-02, UI-03 | TBD |
 
 ---
@@ -68,7 +68,7 @@
   2. `LLMRouter` supports task-based routing across multiple configured providers (Claude, Ollama, and at least one additional API provider such as DeepSeek); a successful chat message's logs show which provider handled orchestration vs. compaction — Claude remains a fully supported, non-removed provider (exact provider-per-task mix is an operator/CONTEXT.md decision, not a fixed swap)
   3. An OmX planning request produces a logged 8-directive DAG and the OmO coordinator log shows it consuming that plan — the two components are traceable as separate concerns in logs
   4. After a deliberate backend process restart mid-engagement, the operator can reconnect with the same session ID and the conversation history, scope, and phase status are restored from disk
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans complete
 - [x] 03-01-PLAN.md — Foundation defect fixes: config fields + SmartMemory/ConversationSummariser stubs (ORCH-02 prereq)
 - [x] 03-02-PLAN.md — LLMRouter multi-provider routing: compaction→Qwen, optional DeepSeek (ORCH-02)
 - [x] 03-03-PLAN.md — SQLite+WAL SessionStore persistence + EngagementSession serialization (PERSIST-01)
@@ -77,7 +77,7 @@
 - [x] 03-06-PLAN.md — OmX planner: forced-tool-use DAG generation + validation retry (ORCH-03)
 - [x] 03-07-PLAN.md — InstructionParser reconciliation: dedupe EngineRouter, EngagementSession signature (ORCH-03/D-02)
 - [x] 03-08-PLAN.md — OmO coordinator: sequential dispatch, scope/plan gates, PHASE_FAILED emission (ORCH-01/ORCH-03)
-- [ ] 03-09-PLAN.md — Orchestrator wiring: OmX→OmO→ResponseComposer pipeline (ORCH-01/ORCH-03)
+- [x] 03-09-PLAN.md — Orchestrator wiring: OmX→OmO→ResponseComposer pipeline (ORCH-01/ORCH-03)
 **UI hint**: no
 
 ### Phase 4: Frontend Split
