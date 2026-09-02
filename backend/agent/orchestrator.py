@@ -106,19 +106,33 @@ class Orchestrator:
     ) -> Dict[str, Any]:
         session.conv_history.add_message("user", message)
 
-        messages = session.conv_history.get_context_window()
-        response = await self.llm_router.complete(
-            messages=messages,
-            mode="orchestration",
-            system=_SYSTEM_PROMPT,
-        )
+        try:
+            plan = await self.omx.plan(message, session)
+        except OmXPlanValidationError as e:
+            rejection = await self._reject_plan(session, e)
+            return {
+                "reply": rejection,
+                "session_id": session.session_id,
+                "tokens_used": 0,
+            }
 
-        session.conv_history.add_message("assistant", response.content)
+        logger.info("OmX generated %d-directive plan", len(plan.directives))
+        logger.info(
+            "OmO dispatch starting for plan with %d directive(s)", len(plan.directives)
+        )
+        await self.omo.dispatch(plan, session, self._agents)
+
+        compaction_response = await self._compact_findings(session)
+
+        reply = self.composer.compose_plan_summary(plan, session)
+        session.conv_history.add_message("assistant", compaction_response.content)
+        session.conv_history.add_message("assistant", reply)
 
         return {
-            "reply": response.content,
+            "reply": reply,
             "session_id": session.session_id,
-            "tokens_used": response.input_tokens + response.output_tokens,
+            "tokens_used": compaction_response.input_tokens
+            + compaction_response.output_tokens,
         }
 
     async def process_stream(
@@ -129,14 +143,59 @@ class Orchestrator:
     ) -> AsyncIterator[str]:
         session.conv_history.add_message("user", message)
 
-        messages = session.conv_history.get_context_window()
-        response = await self.llm_router.complete(
-            messages=messages,
-            mode="orchestration",
-            system=_SYSTEM_PROMPT,
+        try:
+            plan = await self.omx.plan(message, session)
+        except OmXPlanValidationError as e:
+            rejection = await self._reject_plan(session, e)
+            for word in rejection.split():
+                yield word + " "
+            return
+
+        logger.info("OmX generated %d-directive plan", len(plan.directives))
+        logger.info(
+            "OmO dispatch starting for plan with %d directive(s)", len(plan.directives)
         )
+        await self.omo.dispatch(plan, session, self._agents)
 
-        session.conv_history.add_message("assistant", response.content)
+        compaction_response = await self._compact_findings(session)
 
-        for word in response.content.split():
+        reply = self.composer.compose_plan_summary(plan, session)
+        session.conv_history.add_message("assistant", compaction_response.content)
+        session.conv_history.add_message("assistant", reply)
+
+        for word in reply.split():
             yield word + " "
+
+    async def _reject_plan(
+        self, session: EngagementSession, error: "OmXPlanValidationError"
+    ) -> str:
+        """OmXPlanValidationError handler (T-03-03): emit PLAN_REJECTED via
+        clawhip and surface an operator-facing rejection message — never
+        calls omo.dispatch() on a failed plan."""
+        detail = str(error)
+        await self.clawhip.emit(
+            session.session_id,
+            ClawhipEvent(event_type=ClawhipEventType.PLAN_REJECTED, detail=detail),
+        )
+        rejection = f"Plan rejected: {detail}"
+        session.conv_history.add_message("assistant", rejection)
+        return rejection
+
+    async def _compact_findings(self, session: EngagementSession):
+        """MANDATORY, unconditional post-dispatch compaction call (ORCH-02,
+        D-04) — exactly once per process()/process_stream() call, never
+        behind a feature flag or "if risky, skip" branch. Summarizes this
+        dispatch's findings via LLMRouter's mode="compaction" route so raw
+        finding dicts never get dumped wholesale into conv_history."""
+        response = await self.llm_router.complete(
+            messages=[
+                {
+                    "role": "user",
+                    "content": json.dumps(session.state.findings, default=str),
+                }
+            ],
+            mode="compaction",
+            system=_COMPACTION_SYSTEM_PROMPT,
+        )
+        logger.info("LLMRouter: compaction handled by %s", response.model_used)
+        return response

@@ -173,7 +173,7 @@ async def test_process_stream_logs_omx_plan_and_omo_dispatch_as_distinct_lines(c
             async for _ in orchestrator.process_stream(message="run recon", session=session):
                 pass
 
-    messages = [r.message % r.args if r.args else r.message for r in caplog.records]
+    messages = [r.getMessage() for r in caplog.records]
     assert any("OmX generated" in m for m in messages)
     assert any("OmO dispatch" in m for m in messages)
 
@@ -241,7 +241,7 @@ async def test_compaction_resolved_provider_is_logged(caplog):
             async for _ in orchestrator.process_stream(message="run recon", session=session):
                 pass
 
-    messages = [r.message % r.args if r.args else r.message for r in caplog.records]
+    messages = [r.getMessage() for r in caplog.records]
     assert any("compaction handled by" in m for m in messages)
 
 
