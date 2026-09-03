@@ -441,19 +441,21 @@ export default function ScopePanel({ scope, onSetScope }) {
 
 **If this table is empty:** N/A — see above.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should ChatPane surface Clawhip lifecycle events (`PHASE_FAILED`, `GATE_PENDING`, etc.) in the chat UI, or only silently ignore them?**
+> All three questions below were answered during `/gsd:discuss-phase` (see 04-CONTEXT.md). Annotations added inline; none remain blocking.
+
+1. **Should ChatPane surface Clawhip lifecycle events (`PHASE_FAILED`, `GATE_PENDING`, etc.) in the chat UI, or only silently ignore them?** — **RESOLVED by D-12:** ChatPane's message router branches on payload shape and renders `PHASE_FAILED`/`GATE_PENDING` as inline system/error-style messages (reusing 04-UI-SPEC error styling), no-ops other `event_type`s, and must not crash/misrender on `event_type`-shaped payloads. Planned in 04-04 Task 2 (behaviors 4-5).
    - What we know: these events already arrive on the socket `ChatPane` owns (verified — `Clawhip.emit()` uses the same `ws_handler.manager.send(session_id, ...)` as chat chunks). Phase 3's own stated goal for ORCH-01 was "the operator sees phase failures surface in the chat UI instead of silent drops" — but no frontend code currently does this.
    - What's unclear: whether rendering these as system messages in `ChatPane` is in scope for Phase 4 (UI-01/02/03 don't explicitly require it) or should be deferred as a follow-up.
    - Recommendation: at minimum, the message router must not crash or misrender on `event_type`-shaped payloads (Pitfall 4). Treat "render them as system messages" as Claude's Discretion / a cheap bonus given the wiring is already 90% forced by this phase's own message-router work, not a hard requirement.
 
-2. **Where does the WS auth token value come from at runtime?**
+2. **Where does the WS auth token value come from at runtime?** — **RESOLVED by D-11:** hardcoded `'dev-token'` default with an `import.meta.env.VITE_BEARER_TOKEN` override (`import.meta.env.VITE_BEARER_TOKEN || 'dev-token'`), appended as `?token=` to the WS URL — zero required `.env`/`docker-compose.yml` change, matching CLAUDE.md's personal-use static-bearer-token posture. Planned in 04-04 Task 2 (behavior 1).
    - What we know: backend defaults to `"dev-token"`; no `.env` file exists in this repo overriding it; `docker-compose.yml`'s frontend environment block uses dead Next.js-only var names.
    - What's unclear: whether the planner should introduce a `VITE_BEARER_TOKEN` build-time env var (requiring a `docker-compose.yml`/`.env.example` touch, technically outside `frontend/`) or hardcode `"dev-token"` as a personal-use-only default directly in `ChatPane.tsx`/`useWebSocket.js`.
    - Recommendation: given CLAUDE.md's explicit "personal use, no auth hardening beyond static bearer token required for now" constraint, a hardcoded default with an env-var override (`import.meta.env.VITE_BEARER_TOKEN || 'dev-token'`) is proportionate and matches the project's stated security posture — flag for a quick confirm rather than treating as blocked.
 
-3. **Does `docker-compose.yml`'s frontend `environment:` block need updating in this phase?**
+3. **Does `docker-compose.yml`'s frontend `environment:` block need updating in this phase?** — **RESOLVED: deferred, non-blocking (RESEARCH.md's own recommendation):** the live app ignores these stale Next.js-only vars entirely (`window.location.host` is used instead), so leaving them does not newly break anything; not in scope for this frontend-only phase.
    - What we know: it currently sets Next.js-only vars Vite never reads.
    - What's unclear: whether "frontend-only" scope (per CONTEXT.md's phase boundary) extends to this repo-root file.
    - Recommendation: treat as adjacent cleanup, low-risk to include alongside the token-wiring task if the planner adds one, but not blocking if deferred — the app already ignores these vars entirely today (`window.location.host` is used instead), so leaving them stale doesn't newly break anything.
