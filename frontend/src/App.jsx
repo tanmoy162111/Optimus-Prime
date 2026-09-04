@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { SessionContext } from '../context/SessionContext'
 import ErrorBoundary from '../components/ErrorBoundary'
@@ -24,13 +24,19 @@ export default function App() {
   const [events, setEvents]         = useState([])
   const [findings, setFindings]     = useState([])
   const [agents, setAgents]         = useState([])
-  const [chatMessages, setChatMessages] = useState([])
   const [currentPlan, setCurrentPlan]   = useState(null)
   const [scope, setScope]           = useState(null)
   const [engagementActive, setEngagementActive] = useState(false)
   const [engagementStart, setEngagementStart]   = useState(null)
   const [pendingGate, setPendingGate] = useState(null)
   const [eventCounter, setEventCounter] = useState(0)
+
+  // Session state — NEW this phase, owned by App.jsx (D-08), fed up from
+  // ChatPane's onSessionChange/onConnectionChange callbacks. ChatPane owns
+  // the chat socket internally; App.jsx never had a sessionId before, and
+  // chatConnected previously came from the now-removed chat socket below.
+  const [sessionId, setSessionId] = useState(null)
+  const [chatConnected, setChatConnected] = useState(false)
 
   // Terminal panel state
   const [terminalLines, setTerminalLines] = useState([])
@@ -140,44 +146,7 @@ export default function App() {
     setEventCounter(c => c + 1)
   }, [])
 
-  // Chat WebSocket handler
-  // NOTE: retained here for Task 1 (imports + ErrorBoundary wrapping only) —
-  // Task 2 removes this handler and the chat socket call, since ChatPane now
-  // owns the chat socket internally.
-  const handleChatMessage = useCallback((data) => {
-    // Ignore control/handshake messages with no displayable content
-    if (!data.content && !data.plan && data.type !== 'engagement_complete') return
-
-    // Synthesise a human-readable message for engagement completion
-    let content = data.content || ''
-    if (data.type === 'engagement_complete') {
-      const status = data.status === 'completed' ? '✓ Engagement complete'
-        : data.status === 'partial' ? '⚠ Engagement partially complete'
-        : '✗ Engagement failed'
-      content = `${status} — ${data.total_findings ?? 0} finding(s)`
-      if (data.errors?.length) {
-        content += '\n\nErrors:\n' + data.errors.map(e => `• ${e.phase}: ${e.error}`).join('\n')
-      }
-    }
-
-    setChatMessages(prev => [...prev, {
-      role: 'assistant',
-      type: data.type,
-      content,
-      metadata: data.metadata,
-      plan: data.plan,
-    }])
-
-    // Store plan when received
-    if (data.type === 'plan' && data.plan) {
-      setCurrentPlan(data.plan)
-      setFindings([])
-      setAgents([])
-    }
-  }, [])
-
   const { connected: eventsConnected } = useWebSocket(`${WS_BASE}/ws`, handleEventMessage)
-  const { connected: chatConnected, send: sendChat } = useWebSocket(`${WS_BASE}/chat`, handleChatMessage)
 
   const handleTerminalMessage = useCallback((data) => {
     setTerminalLines(prev => {
@@ -197,16 +166,17 @@ export default function App() {
 
   const agentActive = agents.some(a => a.status === 'running')
 
-  // Send operator message
-  const handleSendMessage = useCallback((text) => {
-    setChatMessages(prev => [...prev, { role: 'user', content: text }])
-    sendChat({ content: text })
-  }, [sendChat])
-
   // Send directive from panel
+  // NOTE: ChatPane now owns the chat socket and its own send path internally
+  // (it has no imperative "send" prop exposed to the parent, only pendingGate/
+  // onGateResolve/onSessionChange/onConnectionChange, per its 04-04 contract).
+  // DirectivesPanel's chip-click UX is duplicated by ChatPane's own hint chips
+  // for the 4 most common directives; the remaining directives are still visible
+  // here for discovery. No callback wiring exists to forward a click into
+  // ChatPane's input — out of this plan's interface contract (04-PATTERNS.md).
   const handleSendDirective = useCallback((directive) => {
-    handleSendMessage(directive)
-  }, [handleSendMessage])
+    console.warn('Directive triggered from DirectivesPanel — use the chat input or its hint chips to send:', directive)
+  }, [])
 
   // Set scope
   const handleSetScope = useCallback(async (scopeData) => {
@@ -235,12 +205,15 @@ export default function App() {
     }
   }, [])
 
-  // Session state distribution (D-07/D-08) — placeholder pass-through so the tree
-  // compiles; sessionId/chatConnected declarations and full useMemo wiring land in Task 2.
-  const sessionValue = {
-    chatConnected, eventsConnected, terminalConnected,
+  // Session state distribution (D-07/D-08) — App.jsx remains the state owner,
+  // mirroring its useState fields into a memoized context value. Every field is
+  // listed individually in the dependency array (RESEARCH.md Pattern 2 pitfall:
+  // never pass an inline object literal as the Provider value).
+  const sessionValue = useMemo(() => ({
+    sessionId, chatConnected, eventsConnected, terminalConnected,
     scope, currentPlan, engagementActive, engagementStart,
-  }
+  }), [sessionId, chatConnected, eventsConnected, terminalConnected,
+       scope, currentPlan, engagementActive, engagementStart])
 
   // ── Layout ──────────────────────────────────────────────────────────────
   return (
@@ -298,6 +271,8 @@ export default function App() {
                 <ChatPane
                   pendingGate={pendingGate}
                   onGateResolve={handleGateResolve}
+                  onSessionChange={setSessionId}
+                  onConnectionChange={setChatConnected}
                 />
               </ErrorBoundary>
             </div>
