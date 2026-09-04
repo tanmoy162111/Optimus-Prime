@@ -22,7 +22,7 @@
 | 1 | Cleanup & Configuration | 4/4 | Complete   | 2026-05-12 |
 | 2 | Security Hardening | 4/4 | Complete   | 2026-08-29 |
 | 3 | Orchestration Upgrade | 9/9 | Complete   | 2026-09-02 |
-| 4 | Frontend Split | 1/7 | In Progress|  |
+| 4 | Frontend Split | 3/7 | In Progress|  |
 
 ---
 
@@ -88,10 +88,10 @@
   1. `App.jsx` imports and renders `ChatPane.tsx`; the chat interface visible in the browser is served by `ChatPane.tsx` — confirmed by React DevTools component tree
   2. `TerminalPanel`, `FindingsPanel`, and `ScopePanel` each exist as standalone files under `frontend/components/`; deliberately throwing an error in one panel does not crash the others (error boundary isolates the failure)
   3. Session state (session ID, connection status, engagement metadata) is available via `useContext(SessionContext)` in any component without prop-drilling — a new component added to the tree can access session state with a single context hook call
-**Plans:** 1/7 plans executed
+**Plans:** 3/7 plans executed
 - [x] 04-01-PLAN.md — Fix package.json/lock toolchain, delete Next.js remnants, remove dead /chat proxy (D-10)
-- [ ] 04-02-PLAN.md — Extract shared primitives: useWebSocket hook + lib/constants + lib/format (D-09)
-- [ ] 04-03-PLAN.md — ErrorBoundary (UI-02/D-05) + SessionContext (UI-03/D-07/D-08)
+- [x] 04-02-PLAN.md — Extract shared primitives: useWebSocket hook + lib/constants + lib/format (D-09)
+- [x] 04-03-PLAN.md — ErrorBoundary (UI-02/D-05) + SessionContext (UI-03/D-07/D-08)
 - [ ] 04-04-PLAN.md — Rewrite ChatPane.tsx: /ws/chat URL, ?token= auth, handshake, 3-shape router (UI-01/D-01/D-02/D-03/D-11/D-12)
 - [ ] 04-05-PLAN.md — Extract panels batch 1: Scope/Directives/Plan/Agent/Health (UI-02/D-04)
 - [ ] 04-06-PLAN.md — Extract panels batch 2: StatusBar/Terminal trio/Findings (UI-02/D-04)
