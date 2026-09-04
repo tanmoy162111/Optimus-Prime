@@ -30,7 +30,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 - ✓ Per-engagement Kali workdir scoping in SSHClient/ShellManager — `backend/execution/ssh_client.py`, `backend/execution/shell_manager.py` — Validated in Phase 2: Security Hardening
 - ✓ SQLite WAL mode on ClientProfileDB and ResearchKB connections — `backend/memory/client_profile.py`, `backend/intelligence/research_kb.py` — Validated in Phase 2: Security Hardening
 - ✓ VerificationLoop engagement-scoped budget stub — `backend/verification/verification_loop.py` — Validated in Phase 2: Security Hardening (scoping-only; full classification logic deferred to v1.1 Phase 5)
-- ✓ React frontend operator UI (App.jsx — single-file monolith) — `frontend/`
+- ✓ React frontend operator UI, componentized — `ChatPane.tsx` is the active chat interface (protocol-correct `/ws/chat` handshake), panels extracted to standalone files under `frontend/components/` and individually fault-isolated via `ErrorBoundary`, session state distributed via `SessionContext` — `frontend/` — Validated in Phase 4: Frontend Split
 
 ### Active
 
@@ -51,10 +51,10 @@ A solo operator can run a complete structured pentest engagement — from scopin
 - [ ] Session persistence to disk + reconnect (currently pure in-memory; process restart loses all sessions)
 
 **Milestone 3 — Frontend Split**
-- [ ] Wire `ChatPane.tsx` into `App.jsx` (currently orphaned, not imported)
-- [ ] Extract `TerminalPanel`, `FindingsPanel`, `ScopePanel` into separate components
-- [ ] Wrap each panel in an error boundary
-- [ ] Add `SessionProvider` context for session state
+- [x] Wire `ChatPane.tsx` into `App.jsx` — Validated in Phase 4: Frontend Split
+- [x] Extract `TerminalPanel`, `FindingsPanel`, `ScopePanel` (and 6 other panels) into separate components — Validated in Phase 4: Frontend Split
+- [x] Wrap each panel in an error boundary — Validated in Phase 4: Frontend Split
+- [x] Add `SessionContext` for session state (no prop-drilling) — Validated in Phase 4: Frontend Split
 
 ### Out of Scope
 
@@ -77,6 +77,8 @@ A solo operator can run a complete structured pentest engagement — from scopin
 
 **Mentor architecture target:** 7-layer design — Operator → Gateway → EngagementSession → Coordination (OmO+OmX) → Agents → Tool Execution → Data.
 
+**Frontend state (Phase 4 complete):** `App.jsx` slimmed from a 1505-line monolith to a composition root. `ChatPane.tsx` (rewritten, protocol-correct: `/ws/chat?token=`, `{type:'init'}` handshake, 3-shape message router) is the live chat interface. 9 panels — `ScopePanel`, `DirectivesPanel`, `PlanPanel`, `AgentTracker`, `HealthPanel`, `StatusBar`, `TerminalPanel` (+`TerminalLine`/`TerminalInput`), `FindingsPanel`, `ChatPane` — each individually wrapped in `ErrorBoundary` for fault isolation. `SessionContext` distributes `sessionId`/`chatConnected`/connection state via a memoized provider, no prop-drilling. Known gap: `DirectivesPanel`'s chip-click (`handleSendDirective`) is now a documented no-op since `ChatPane` doesn't expose an imperative send prop — not required by Phase 4's interface contract, tracked for later. Live chat round-trip against a real backend is pending human verification (04-HUMAN-UAT.md) — sandbox environment cannot run the FastAPI+Kali backend.
+
 ## Constraints
 
 - **Personal use:** Single operator, no auth hardening beyond static bearer token required for now
@@ -95,7 +97,7 @@ A solo operator can run a complete structured pentest engagement — from scopin
 | Multi-provider LLMRouter (not a Claude swap) | Original mentor recommendation was to replace Claude with DeepSeek-V3 wholesale, which conflicted with the Anthropic+Ollama-only constraint. Operator chose multi-provider routing instead — DeepSeek and others become additional options, task-routed, not a replacement | ✓ Good — decided during Phase 3 planning |
 | Per-engagement Kali workdirs | Commands from different sessions must not bleed into same filesystem state | ✓ Good — Phase 2 (component-level; orchestrator still doesn't call sub-agents, pre-existing gap outside Phase 2 scope) |
 | Docker-outside-of-Docker (DooD) for sandbox isolation | Smaller change than a host-level sidecar process; backend container gains host Docker access as a tradeoff, accepted given single-operator use and zero live callers this phase | ✓ Good — Phase 2 (D-10) |
-| Frontend component split after backend stabilizes | App.jsx monolith acceptable until backend is correct; don't split before foundation is solid | — Pending |
+| Frontend component split after backend stabilizes | App.jsx monolith acceptable until backend is correct; don't split before foundation is solid | ✓ Good — Phase 4 |
 
 ## Evolution
 
@@ -115,4 +117,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-29 after Phase 2: Security Hardening*
+*Last updated: 2026-09-04 after Phase 4: Frontend Split*
