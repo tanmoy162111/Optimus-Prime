@@ -18,11 +18,6 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
-      '/chat': {
-        target: 'ws://backend:8000',
-        ws: true,
-        changeOrigin: true,
-      },
     },
   },
   test: {
