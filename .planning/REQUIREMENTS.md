@@ -32,9 +32,9 @@
 
 ### UI — Frontend Component Split
 
-- [ ] **UI-01**: `ChatPane.tsx` is imported and rendered in `App.jsx` as the primary chat interface (currently the component exists but is not imported anywhere)
-- [ ] **UI-02**: `TerminalPanel`, `FindingsPanel`, and `ScopePanel` are extracted from `App.jsx` into separate component files, each wrapped in an error boundary
-- [ ] **UI-03**: `SessionProvider` context is introduced to manage session state, replacing prop-drilling in `App.jsx`
+- [x] **UI-01**: `ChatPane.tsx` is imported and rendered in `App.jsx` as the primary chat interface (currently the component exists but is not imported anywhere)
+- [x] **UI-02**: `TerminalPanel`, `FindingsPanel`, and `ScopePanel` are extracted from `App.jsx` into separate component files, each wrapped in an error boundary
+- [x] **UI-03**: `SessionProvider` context is introduced to manage session state, replacing prop-drilling in `App.jsx`
 
 ## v2 Requirements
 
@@ -72,9 +72,9 @@
 | ORCH-02 | Phase 3 — Orchestration Upgrade | Pending |
 | ORCH-03 | Phase 3 — Orchestration Upgrade | Pending |
 | PERSIST-01 | Phase 3 — Orchestration Upgrade | Pending |
-| UI-01 | Phase 4 — Frontend Split | Pending |
-| UI-02 | Phase 4 — Frontend Split | Pending |
-| UI-03 | Phase 4 — Frontend Split | Pending |
+| UI-01 | Phase 4 — Frontend Split | Complete |
+| UI-02 | Phase 4 — Frontend Split | Complete |
+| UI-03 | Phase 4 — Frontend Split | Complete |
 
 **Coverage:**
 - v1 requirements: 13 total
