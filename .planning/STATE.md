@@ -80,6 +80,18 @@ Requirements satisfied: 1 / 13
 - custom_tool_generator._register_tool() dependency on deleted tool_spec needs Phase 2 resolution — 4 tests xfailed (NotImplementedError stub now in place)
 - Phase 2 (Security Hardening): Docker sandbox, WAL mode, VerificationLoop scoping, per-engagement Kali workdirs
 
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-09-05:
+
+| Category | Item | Status |
+|----------|------|--------|
+| debug | frontend-backend-disconnected | fix-confirmed (live docker compose verification pending operator's own environment) |
+| uat_gap | 01-HUMAN-UAT.md | partial (live Claude API smoke test pending operator's own backend) |
+| uat_gap | 04-HUMAN-UAT.md | partial (live chat round-trip pending operator's own backend) |
+| verification_gap | 01-VERIFICATION.md | human_needed |
+| verification_gap | 04-VERIFICATION.md | human_needed |
+
 ## Session Continuity
 
 Last session: 2026-09-02T07:22:28.912Z

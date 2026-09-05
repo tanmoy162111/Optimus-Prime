@@ -22,13 +22,13 @@
 
 ### ORCH — Orchestration Upgrade
 
-- [ ] **ORCH-01**: `PHASE_FAILED` events are propagated through the agent execution loop and surfaced to the operator via the WebSocket event stream
-- [ ] **ORCH-02**: `LLMRouter` supports multi-provider task-based routing — Claude remains the orchestration provider (not replaced), Qwen (via Ollama) handles compaction, DeepSeek is wired as an optional additional provider
-- [ ] **ORCH-03**: `OmX` planner implements template-first planning with an 8-directive phase DAG, operating as a separate component from the `OmO` coordinator
+- [x] **ORCH-01**: `PHASE_FAILED` events are propagated through the agent execution loop and surfaced to the operator via the WebSocket event stream
+- [x] **ORCH-02**: `LLMRouter` supports multi-provider task-based routing — Claude remains the orchestration provider (not replaced), Qwen (via Ollama) handles compaction, DeepSeek is wired as an optional additional provider
+- [x] **ORCH-03**: `OmX` planner implements template-first planning with an 8-directive phase DAG, operating as a separate component from the `OmO` coordinator
 
 ### PERSIST — Session Durability
 
-- [ ] **PERSIST-01**: Engagement sessions are serialized to disk and can be reloaded on reconnect after a process restart (currently pure in-memory; restart loses all session state)
+- [x] **PERSIST-01**: Engagement sessions are serialized to disk and can be reloaded on reconnect after a process restart (currently pure in-memory; restart loses all session state)
 
 ### UI — Frontend Component Split
 
@@ -68,10 +68,10 @@
 | SEC-02 | Phase 2 — Security Hardening | Complete |
 | DATA-01 | Phase 2 — Security Hardening | Complete |
 | DATA-02 | Phase 2 — Security Hardening | Complete |
-| ORCH-01 | Phase 3 — Orchestration Upgrade | Pending |
-| ORCH-02 | Phase 3 — Orchestration Upgrade | Pending |
-| ORCH-03 | Phase 3 — Orchestration Upgrade | Pending |
-| PERSIST-01 | Phase 3 — Orchestration Upgrade | Pending |
+| ORCH-01 | Phase 3 — Orchestration Upgrade | Complete |
+| ORCH-02 | Phase 3 — Orchestration Upgrade | Complete |
+| ORCH-03 | Phase 3 — Orchestration Upgrade | Complete |
+| PERSIST-01 | Phase 3 — Orchestration Upgrade | Complete |
 | UI-01 | Phase 4 — Frontend Split | Complete |
 | UI-02 | Phase 4 — Frontend Split | Complete |
 | UI-03 | Phase 4 — Frontend Split | Complete |
@@ -83,4 +83,4 @@
 
 ---
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 — traceability populated by roadmapper*
+*Last updated: 2026-09-05 — ORCH-01/02/03 and PERSIST-01 corrected to Complete (stale since Phase 3 closed 2026-09-02; verified against 03-VERIFICATION.md during v1.0 milestone close)*
