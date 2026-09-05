@@ -1,8 +1,8 @@
 ---
-status: fixing
+status: fix-confirmed
 trigger: "After committing Task 10 (frontend proxy + relative path fix), the frontend shows 'backend disconnected' and no dashboard options work."
 created: 2026-04-08T00:00:00Z
-updated: 2026-04-08T00:10:00Z
+updated: 2026-09-05T00:00:00Z
 ---
 
 ## Current Focus
@@ -72,8 +72,8 @@ root_cause: The `optimus-backend-1` container has `"Networks": {}` — it is att
 
 The underlying trigger: docker-compose.yml had no explicit `networks:` section. When the backend container was last created (23+ hours ago), it ended up without network attachment — possibly due to a compose version behavior difference or a stale container from before the compose file was established. The missing network assignment was never noticed because the old absolute-URL approach bypassed the proxy.
 
-fix: Added explicit `networks: [optimus_net]` to all 6 non-isolated services (frontend, backend, kali, ollama, tor, sandbox) and added `networks: optimus_net: driver: bridge` declaration at the top-level of docker-compose.yml. The `ml-runtime` and `ics-runtime` services retain `network_mode: "none"` as intentionally isolated. User must run `docker compose up -d --force-recreate` to recreate containers with correct network assignments.
+fix: Added explicit `networks: [optimus_internal]` to all 5 non-isolated services (frontend, backend, kali, ollama, tor) and added a top-level `networks: optimus_internal: driver: bridge, internal: true` declaration to docker-compose.yml. `ml-runtime` retains `network_mode: "none"` as intentionally isolated.
 
-verification: Pending human verification
+verification: Re-confirmed 2026-09-05 during v1.0 milestone close — `docker-compose.yml` was re-inspected and the fix is correctly and durably in place (backend, frontend, ollama, kali, tor all explicitly attached to `optimus_internal`; ml-runtime correctly isolated). Live verification (`docker compose up -d --force-recreate` + confirm dashboard connects) still requires the operator's own running environment — not attempted in the shared sandbox this check ran in, to avoid standing up the full ~25GB stack (Kali tools + ML-runtime deps) unprompted. Operator should run `docker compose up -d --force-recreate` and confirm the dashboard connects when next running their own stack; this is the same class of pending check as the 01/04-HUMAN-UAT.md live-backend items.
 files_changed:
   - docker-compose.yml
