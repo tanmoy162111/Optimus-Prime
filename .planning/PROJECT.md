@@ -31,30 +31,22 @@ A solo operator can run a complete structured pentest engagement — from scopin
 - ✓ SQLite WAL mode on ClientProfileDB and ResearchKB connections — `backend/memory/client_profile.py`, `backend/intelligence/research_kb.py` — Validated in Phase 2: Security Hardening
 - ✓ VerificationLoop engagement-scoped budget stub — `backend/verification/verification_loop.py` — Validated in Phase 2: Security Hardening (scoping-only; full classification logic deferred to v1.1 Phase 5)
 - ✓ React frontend operator UI, componentized — `ChatPane.tsx` is the active chat interface (protocol-correct `/ws/chat` handshake), panels extracted to standalone files under `frontend/components/` and individually fault-isolated via `ErrorBoundary`, session state distributed via `SessionContext` — `frontend/` — Validated in Phase 4: Frontend Split
+- ✓ `PHASE_FAILED` event propagation through the agent execution loop to the WebSocket stream — `backend/agent/omo.py`, `backend/agent/clawhip.py` — Validated in Phase 3: Orchestration Upgrade
+- ✓ `LLMRouter` multi-provider task-based routing (Claude orchestration, Ollama/Qwen compaction, optional DeepSeek) — `backend/agent/llm_router.py` — Validated in Phase 3: Orchestration Upgrade
+- ✓ `OmX` template-first planner producing a validated 8-directive DAG, independent of the `OmO` coordinator — `backend/agent/omx.py`, `backend/agent/omo.py` — Validated in Phase 3: Orchestration Upgrade
+- ✓ Engagement session persistence to disk (SQLite+WAL) with reconnect-after-restart — `backend/session/session_store.py`, `backend/session/engagement_session.py` — Validated in Phase 3: Orchestration Upgrade
 
 ### Active
 
-<!-- Building toward these. Current milestone: stabilize and harden the foundation. -->
+<!-- v1.0 shipped 2026-09-05 (all 4 phases validated above). Seeded below from REQUIREMENTS.md's "v2 Requirements" section as forward candidates for the next milestone — not yet committed to a roadmap. Run /gsd:new-milestone to define the next milestone's actual scope. -->
 
-**Milestone 1 — Critical Bug Fixes & Dead Code Removal**
-- [x] Delete old backend system (`backend/main.py`, `backend/core/`, `backend/agents/`) and migrate tests that import from them — Validated in Phase 1: Cleanup & Configuration
-- [x] Fix model string: `claude_model` is now `"claude-sonnet-4-6"` — Validated in Phase 1: Cleanup & Configuration
-- [x] Docker sandbox for generated tool execution — Validated in Phase 2: Security Hardening
-- [x] SQLite WAL mode on every connection — Validated in Phase 2: Security Hardening
-- [x] Per-engagement Kali working directories — Validated in Phase 2: Security Hardening
-- [x] VerificationLoop `_request_counts` scoped by `engagement_id` — minimal stub built in Phase 2 (full CONFIRMED/FALSE_POSITIVE/MANUAL_REVIEW logic deferred to v1.1 Phase 5)
+**Hardening**
+- [ ] HARD-01: Multi-tenant auth hardening — rate limiting, per-user tokens, audit log (personal use only for now; static bearer token is sufficient)
+- [ ] HARD-02: Operator-visible XAI log review panel — surface `XAILogger` decisions in the frontend
 
-**Milestone 2 — Orchestration Upgrade**
-- [ ] PHASE_FAILED event propagation through the agent loop
-- [ ] LLMRouter extended to multi-provider task-based routing (Claude + Ollama + DeepSeek/other API providers as needed) — not a wholesale swap off Claude
-- [ ] OmX template-first planner: 8-directive planning DAG, separate from OmO coordinator
-- [ ] Session persistence to disk + reconnect (currently pure in-memory; process restart loses all sessions)
-
-**Milestone 3 — Frontend Split**
-- [x] Wire `ChatPane.tsx` into `App.jsx` — Validated in Phase 4: Frontend Split
-- [x] Extract `TerminalPanel`, `FindingsPanel`, `ScopePanel` (and 6 other panels) into separate components — Validated in Phase 4: Frontend Split
-- [x] Wrap each panel in an error boundary — Validated in Phase 4: Frontend Split
-- [x] Add `SessionContext` for session state (no prop-drilling) — Validated in Phase 4: Frontend Split
+**Intelligence**
+- [ ] INTEL-01: Custom tool generator (three-gate pipeline in `backend/tools/backends/sandbox.py`) validated and surfaced to operators
+- [ ] INTEL-02: Compliance report export — NIST-CSF, PCI-DSS, GDPR, ISO27001, SOC2 mapping from `backend/reporting/`
 
 ### Out of Scope
 
@@ -64,6 +56,8 @@ A solo operator can run a complete structured pentest engagement — from scopin
 - **Real-time collaboration** — single operator per engagement; no multi-user session sharing
 
 ## Context
+
+**v1.0 Foundation Stabilization shipped 2026-09-05.** All 4 phases (Cleanup & Configuration, Security Hardening, Orchestration Upgrade, Frontend Split) complete, 24/24 plans, 13/13 v1 requirements validated. See `.planning/milestones/v1.0-ROADMAP.md` and `.planning/MILESTONES.md` for the full archived record. Two items remain pending human verification against the operator's own live backend (not verifiable in the sandbox this milestone was executed in): the Phase 1 Claude-API-no-fallback smoke test and the Phase 4 live chat round-trip — tracked in STATE.md's Deferred Items and their respective `*-HUMAN-UAT.md` files.
 
 **Architecture state (Phase 1 complete):** Single canonical backend system. Old system (`backend/core/`, `backend/agents/`, `backend/main.py`) deleted. All tests unified under `tests/` — 144 passing, 2 skipped, 15 xfailed (known stubs). `backend/intelligence/custom_tool_generator.py` has NotImplementedError stubs for tool registration (requires Phase 2 tool registry).
 
@@ -117,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-04 after Phase 4: Frontend Split*
+*Last updated: 2026-09-05 after v1.0 Foundation Stabilization milestone*

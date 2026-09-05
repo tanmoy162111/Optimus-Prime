@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: milestone_complete
-stopped_at: Milestone complete (Phase 04 was final phase)
-last_updated: 2026-09-04T20:04:37.870Z
+status: Awaiting next milestone
+stopped_at: Phase 4 UI-SPEC approved
+last_updated: "2026-09-05T00:55:43.550Z"
+last_activity: 2026-09-05 — Milestone v1.0 completed and archived
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 24
   completed_plans: 24
-  percent: 75
+  percent: 100
 ---
 
 # Project State
@@ -23,11 +24,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 04 (frontend-split) — EXECUTING
-Plan: 1 of 7
-**Phase:** 04 of 4 (security hardening)
-**Plan:** Not started
-**Status:** Milestone complete
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-05 — Milestone v1.0 completed and archived
 
 ## Progress
 
@@ -97,3 +97,7 @@ Items acknowledged and deferred at milestone close on 2026-09-05:
 Last session: 2026-09-02T07:22:28.912Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-frontend-split/04-UI-SPEC.md
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
